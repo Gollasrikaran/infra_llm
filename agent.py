@@ -72,3 +72,8 @@ def extract_image_data(image_path: str) -> str:
         
     except Exception as e:
         raise Exception(f"Failed to extract data from image: {str(e)}")
+
+
+def extract_image_data_from_bytes(img_bytes: bytes) -> str:
+    """For Streamlit usage when image is already in memory."""
+    return _extract_image_text(img_bytes, filename="image.png")

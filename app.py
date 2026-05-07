@@ -5,7 +5,7 @@ import json
 import re
 import fitz
 import streamlit as st
-
+from agent import extract_image_data_from_bytes
 from dotenv import load_dotenv
 from PIL import Image
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -135,42 +135,42 @@ def render_page(pdf_bytes: bytes, page_index: int, dpi: int = 150) -> bytes:
     return img_bytes
 
 
-def analyze_image(img_bytes: bytes) -> str:
-    """Send image to Gemini and return raw response string."""
-    llm = ChatGoogleGenerativeAI(
-        model=PRIMARY_MODEL,
-        temperature=0.2,          # lower = more deterministic for structured output
-        google_api_key=GOOGLE_API_KEY
-    )
+# def analyze_image(img_bytes: bytes) -> str:
+#     """Send image to Gemini and return raw response string."""
+#     llm = ChatGoogleGenerativeAI(
+#         model=PRIMARY_MODEL,
+#         temperature=0.2,          # lower = more deterministic for structured output
+#         google_api_key=GOOGLE_API_KEY
+#     )
 
-    image_b64 = base64.b64encode(img_bytes).decode("utf-8")
+#     image_b64 = base64.b64encode(img_bytes).decode("utf-8")
 
-    prompt = (
-        "This is a highway cross-section engineering drawing.\n\n"
-        "Look at the V-shaped intersection area in the center of the drawing.\n"
-        "At the bottom of the V (the centerline):\n\n"
-        "  • If the DOTTED line is ABOVE the SOLID line → CUT\n"
-        "  • If the SOLID line is ABOVE the DOTTED line → FILL\n\n"
-        "Respond ONLY with valid JSON:\n"
-        "{\n"
-        '  "type": "CUT" or "FILL",\n'
-        '  "station": "station number if visible, else null",\n'
-        '  "elevation": "key elevation values if visible, else null",\n'
-        '  "slopes": "slope ratios visible on drawing, else null",\n'
-        '  "notes": "brief observation"\n'
-        '  "Area": "Calculate the area according to the mesurements from the x axis, so that one value is equals to one square foot"\n'
-        "}"
-    )
+#     prompt = (
+#         "This is a highway cross-section engineering drawing.\n\n"
+#         "Look at the V-shaped intersection area in the center of the drawing.\n"
+#         "At the bottom of the V (the centerline):\n\n"
+#         "  • If the DOTTED line is ABOVE the SOLID line → CUT\n"
+#         "  • If the SOLID line is ABOVE the DOTTED line → FILL\n\n"
+#         "Respond ONLY with valid JSON:\n"
+#         "{\n"
+#         '  "type": "CUT" or "FILL",\n'
+#         '  "station": "station number if visible, else null",\n'
+#         '  "elevation": "key elevation values if visible, else null",\n'
+#         '  "slopes": "slope ratios visible on drawing, else null",\n'
+#         '  "notes": "brief observation"\n'
+#         '  "Area": "Calculate the area according to the mesurements from the x axis, so that one value is equals to one square foot"\n'
+#         "}"
+#     )
 
-    response = llm.invoke([{
-        "role": "user",
-        "content": [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
-        ]
-    }])
+#     response = llm.invoke([{
+#         "role": "user",
+#         "content": [
+#             {"type": "text", "text": prompt},
+#             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
+#         ]
+#     }])
 
-    return response.content
+#     return response.content
 
 
 def parse_result(raw: str) -> dict | None:
@@ -309,7 +309,7 @@ with col_right:
 
     if analyze_clicked:
         with st.spinner("Sending to Gemini Vision..."):
-            raw_result = analyze_image(img_bytes)
+            raw_result = extract_image_data_from_bytes(img_bytes)
 
         parsed = parse_result(raw_result)
 
