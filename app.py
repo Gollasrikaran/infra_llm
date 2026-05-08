@@ -185,14 +185,14 @@ def parse_result(raw: str) -> dict | None:
 def render_result(data: dict):
     """Render the structured result with styled cards."""
     cf_type = data.get("type", "UNKNOWN").upper()
-
+ 
     if cf_type == "CUT":
         card_cls, color_cls, icon = "result-cut", "cut-color", "🔴"
     elif cf_type == "FILL":
         card_cls, color_cls, icon = "result-fill", "fill-color", "🟢"
     else:
         card_cls, color_cls, icon = "result-unk", "", "⚪"
-
+ 
     st.markdown(f"""
     <div class="{card_cls}">
         <div class="result-type {color_cls}">{icon} {cf_type}</div>
@@ -217,7 +217,38 @@ def render_result(data: dict):
         </div>
     </div>
     """, unsafe_allow_html=True)
-
+ 
+    # ── Area Calculation Breakdown ──────────────────────────────────────────
+    area_calc = data.get("area_calculation")
+    if area_calc and isinstance(area_calc, dict):
+        st.markdown('<div class="section-hdr">Area Calculation Breakdown (Trapezoidal Method)</div>',
+                    unsafe_allow_html=True)
+ 
+        samples = area_calc.get("sample_points", [])
+        if samples:
+            import pandas as pd
+            df = pd.DataFrame(samples)
+            # Rename columns for display
+            col_map = {
+                "x": "Offset (ft)",
+                "existing_elev": "Existing Elev (ft)",
+                "proposed_elev": "Proposed Elev (ft)",
+                "gap": "Gap (ft)"
+            }
+            df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+            st.dataframe(df, use_container_width=True, hide_index=True)
+ 
+        total = area_calc.get("total_area_sqft")
+        if total is not None:
+            st.markdown(
+                f'<div class="info-item" style="margin-top:0.5rem">'
+                f'<div class="k">Total Area</div>'
+                f'<div class="val" style="font-size:1.3rem;color:#7eb8f7;font-family:IBM Plex Mono">'
+                f'{total:,.1f} sq ft</div></div>',
+                unsafe_allow_html=True
+            )
+ 
+    # ── Line Identification ─────────────────────────────────────────────────
     st.markdown('<div class="section-hdr">Line Identification</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
@@ -230,16 +261,17 @@ def render_result(data: dict):
             <div class="k">Proposed Grade</div>
             <div class="v">{data.get("proposed_grade_line","—")}</div></div>""",
             unsafe_allow_html=True)
+ 
     if data.get("reasoning"):
         st.markdown('<div class="section-hdr">Reasoning</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="info-item"><div class="v">{data["reasoning"]}</div></div>',
             unsafe_allow_html=True)
-
+ 
     if data.get("notes"):
         st.markdown('<div class="section-hdr">Notes</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="info-item"><div class="v">{data["notes"]}</div></div>',
                     unsafe_allow_html=True)
-
+ 
     with st.expander("Raw JSON"):
         st.markdown(f'<div class="raw-json">{json.dumps(data, indent=2)}</div>',
                     unsafe_allow_html=True)
