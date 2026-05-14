@@ -6,7 +6,6 @@ import fitz
 import pandas as pd
 import streamlit as st
 from agent import extract_image_data_from_bytes
-from area_calculator import calculate_area          # ← NEW
 from dotenv import load_dotenv
 from PIL import Image
 
@@ -411,9 +410,10 @@ with col_right:
 
         # ── OpenCV area (runs immediately, no API call) ──────────────────────
         with st.spinner("📐 Measuring pixel area with OpenCV..."):
-            from area_calculator import generate_debug_image
-            cv_result = calculate_area(img_bytes)
-            debug_png = generate_debug_image(img_bytes)
+            from area_calculator import generate_debug_image, crop_to_drawing, calculate_area
+            img_bytes_cropped = crop_to_drawing(img_bytes)   # ← removes empty whitespace
+            cv_result = calculate_area(img_bytes_cropped)
+            debug_png = generate_debug_image(img_bytes_cropped)
         render_opencv_result(cv_result)
 
         # ── Debug visualization ───────────────────────────────────────────────
