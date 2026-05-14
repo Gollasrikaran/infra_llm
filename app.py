@@ -12,6 +12,7 @@ from PIL import Image
 load_dotenv()
 
 st.set_page_config(page_title="Cross-Section Analyzer", page_icon="🛣️", layout="wide")
+st.cache_data.clear()
 
 st.markdown("""
 <style>

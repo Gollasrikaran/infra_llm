@@ -67,17 +67,24 @@ def _detect_grid_px(gray: np.ndarray) -> float:
     grid_mask = cv2.inRange(gray, 155, 220)
     col_sums  = grid_mask.sum(axis=0).astype(float)
 
+    print(f"GRID DEBUG: col_sums max={col_sums.max():.0f}")
+
     if col_sums.max() > 0:
         peaks, _ = find_peaks(col_sums,
                                height=col_sums.max() * 0.3,
                                distance=5)
+        print(f"GRID DEBUG: peaks found={len(peaks)}")
         if len(peaks) >= 4:
             spacings = np.diff(peaks).tolist()
             # Keep only minor grid spacings (major lines are 10x further apart)
-            minor = [s for s in spacings if 10 < s < 300]
-            if len(minor) >= 3:
-                return float(np.median(minor))   # median is robust to outliers
+            minor = [s for s in spacings if 10 < s < 100]
+            print(f"GRID DEBUG: minor spacings={sorted(minor)}")
+            if len(minor) >= 1:
+                result = float(np.median(minor))
+                print(f"GRID DEBUG: result={result}px")  # ← add this
+                return result
 
+    print("GRID DEBUG: fell through to border fallback")
     # Fallback: border method
     h, w = gray.shape
     _, dark = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
@@ -277,12 +284,15 @@ def _find_regions(profile_a: dict, profile_b: dict) -> list:
 # ════════════════════════════════════════════════════════════════════════════
 
 def calculate_area(img_bytes: bytes) -> dict:
+    print("CALCULATE_AREA CALLED")
     try:
         nparr = np.frombuffer(img_bytes, np.uint8)
         img   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             return {"error": "Could not decode image"}
 
+        import inspect
+        print("FILE:", inspect.getfile(calculate_area))    
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         hsv  = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
