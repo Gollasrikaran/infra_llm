@@ -7,6 +7,15 @@ Supports TWO image types automatically:
   - COLORED images (blue = existing ground, orange = proposed grade)
   - B&W PDF renders (solid + dashed black lines on white/gray grid)
 
+B&W detection pipeline (ported from working Colab logic):
+  1. Detect grid scale FIRST on raw gray image
+  2. Remove grid lines via morphological operations
+  3. Connected components → classify by shape:
+       dotted segments  → proposed grade  (profile_b / orange in debug)
+       long solid lines → existing ground (profile_a / red in debug)
+  4. Build x→y profiles from the two masks
+  5. Calculate area using grid scale from step 1
+
 Area formula:
     total_px_area = Σ |y_line1[x] − y_line2[x]|  for all x where both lines exist
     area_sqft     = total_px_area / px_per_sqft
@@ -58,12 +67,10 @@ def crop_to_drawing(img_bytes: bytes) -> bytes:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# GRID DETECTION  –  border-based, always correct
+# GRID DETECTION  –  runs on raw gray image BEFORE any processing
 # ════════════════════════════════════════════════════════════════════════════
 
 def _detect_grid_px(gray: np.ndarray) -> float:
-    from scipy.signal import find_peaks
-
     grid_mask = cv2.inRange(gray, 155, 220)
     col_sums  = grid_mask.sum(axis=0).astype(float)
 
@@ -76,16 +83,14 @@ def _detect_grid_px(gray: np.ndarray) -> float:
         print(f"GRID DEBUG: peaks found={len(peaks)}")
         if len(peaks) >= 4:
             spacings = np.diff(peaks).tolist()
-            # Keep only minor grid spacings (major lines are 10x further apart)
             minor = [s for s in spacings if 10 < s < 100]
             print(f"GRID DEBUG: minor spacings={sorted(minor)}")
             if len(minor) >= 1:
                 result = float(np.median(minor))
-                print(f"GRID DEBUG: result={result}px")  # ← add this
+                print(f"GRID DEBUG: result={result}px")
                 return result
 
     print("GRID DEBUG: fell through to border fallback")
-    # Fallback: border method
     h, w = gray.shape
     _, dark = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
     left_border = 0
@@ -127,109 +132,84 @@ def _profiles_colored(hsv: np.ndarray):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# B&W IMAGE
+# B&W IMAGE  –  Colab-style connected components classification
 # ════════════════════════════════════════════════════════════════════════════
 
-def _find_axis_row(dark: np.ndarray) -> int:
-    """Row with the most dark pixels in the bottom 60% = X-axis."""
-    h = dark.shape[0]
-    start = int(h * 0.40)
-    rc = np.array([dark[y, :].sum() // 255 for y in range(start, h)])
-    if rc.max() == 0:
-        return int(h * 0.85)
-    return int(rc.argmax()) + start
-
-
 def _profiles_bw(gray: np.ndarray):
-    h, w = gray.shape
-    _, dark = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY_INV)
+    """
+    Port of the working Colab logic:
+      1. Threshold → binary dark pixels
+      2. Detect and remove grid lines (vertical + horizontal morphological kernels)
+      3. Connected components on clean image
+      4. Border protection (8% each side) — ignores scale numbers on edges
+      5. Classify each component:
+           arrows    → skip  (h >= 16 and w <= 45)
+           dotted    → proposed grade / profile_b  (small segments)
+           solid     → existing ground / profile_a (long components)
+      6. Build x→y profile dicts from the two masks
+    """
+    h_img, w_img = gray.shape
 
-    axis_row = _find_axis_row(dark)
+    # ── Step 1: threshold ────────────────────────────────────────────────────
+    _, bw = cv2.threshold(gray, 235, 255, cv2.THRESH_BINARY_INV)
 
-    search_end = int(h * 0.40)
-    rc_top = np.array([dark[y, :].sum() // 255 for y in range(search_end)])
-    top_border = int(rc_top.argmax()) if rc_top.max() > 0 else 0
-    top = top_border + 5
-    bot = axis_row - 12
-    if bot <= top + 10:
-        bot = axis_row - 3
-    if bot <= top:
-        return {}, {}
+    # ── Step 2: grid removal ─────────────────────────────────────────────────
+    ver_k = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 200))
+    hor_k = cv2.getStructuringElement(cv2.MORPH_RECT, (200, 1))
+    grid_mask = cv2.add(
+        cv2.morphologyEx(bw, cv2.MORPH_OPEN, ver_k),
+        cv2.morphologyEx(bw, cv2.MORPH_OPEN, hor_k)
+    )
+    # Protect diagram pixels that touch grid lines from being erased
+    diagram_only  = cv2.subtract(bw, grid_mask)
+    bridge_shield = cv2.dilate(diagram_only, np.ones((3, 3), np.uint8), iterations=1)
+    eraser        = cv2.subtract(grid_mask, bridge_shield)
+    clean_bw      = cv2.subtract(bw, eraser)
 
-    zone_h = bot - top
+    # ── Step 3: connected components ─────────────────────────────────────────
+    nlabels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        clean_bw, 8, cv2.CV_32S
+    )
 
-    # Crop out right 15% (elevation labels live there)
-    right_crop = int(w * 0.85)
-    zone = dark[top:bot, :right_crop].copy()
+    # ── Step 4: classify into two masks ──────────────────────────────────────
+    border_w = int(w_img * 0.08)
+    border_h = int(h_img * 0.08)
 
-    # Remove tall vertical structural columns
-    for x in range(right_crop):
-        ys = np.where(zone[:, x] > 0)[0]
-        if len(ys) == 0:
-            continue
-        if int(ys.max()) - int(ys.min()) > zone_h * 0.15:
-            zone[:, x] = 0
+    existing_mask = np.zeros((h_img, w_img), dtype=np.uint8)   # solid  → profile_a
+    proposed_mask = np.zeros((h_img, w_img), dtype=np.uint8)   # dotted → profile_b
 
-    # Dilate horizontally to bridge dashed-line gaps
-    kernel  = np.ones((1, 30), np.uint8)
-    dilated = cv2.dilate(zone, kernel, iterations=1)
+    for i in range(1, nlabels):
+        x, y, w, h, area = stats[i]
 
-    # Row projection → find 2 dominant reference rows
-    row_sums = dilated.sum(axis=1).astype(float)
-    if row_sums.max() == 0:
-        return {}, {}
-
-    peaks, props = find_peaks(row_sums,
-                               height=row_sums.max() * 0.15,
-                               distance=6)
-
-    if len(peaks) < 2:
-        if len(peaks) == 1:
-            profile_a = {}
-            for x in range(right_crop):
-                ys = np.where(dilated[:, x] > 0)[0]
-                if len(ys):
-                    profile_a[x] = float(ys.mean()) + top
-            return profile_a, {}
-        return {}, {}
-
-    heights        = props["peak_heights"]
-    top2_idx       = np.argsort(heights)[-2:]
-    ref_rows_zone  = sorted(peaks[top2_idx].tolist())
-    ref_row_a_zone = ref_rows_zone[0]
-    ref_row_b_zone = ref_rows_zone[1]
-    mid_zone       = (ref_row_a_zone + ref_row_b_zone) / 2.0
-
-    profile_a: dict = {}
-    profile_b: dict = {}
-
-    for x in range(right_crop):
-        ys = np.where(dilated[:, x] > 0)[0]
-        if len(ys) == 0:
+        # Border protection — skip anything touching the 8% border
+        if (x < border_w or (x + w) > (w_img - border_w) or
+                y < border_h or (y + h) > (h_img - border_h)):
             continue
 
-        upper_ys = ys[ys <= mid_zone]
-        lower_ys = ys[ys >  mid_zone]
+        diag_len     = np.sqrt(w ** 2 + h ** 2)
+        aspect_ratio = w / h if h > 0 else 0
 
-        if len(upper_ys) > 0:
-            profile_a[x] = float(upper_ys.mean()) + top
-        if len(lower_ys) > 0:
-            profile_b[x] = float(lower_ys.mean()) + top
+        # Arrow interceptor — tall but narrow → skip
+        if h >= 16 and w <= 45:
+            continue
 
-        if len(upper_ys) == 0 and len(lower_ys) > 0:
-            mean_y = float(lower_ys.mean())
-            if abs(mean_y - ref_row_a_zone) < abs(mean_y - ref_row_b_zone):
-                profile_a[x] = mean_y + top
-                del profile_b[x]
-        elif len(lower_ys) == 0 and len(upper_ys) > 0:
-            mean_y = float(upper_ys.mean())
-            if abs(mean_y - ref_row_b_zone) < abs(mean_y - ref_row_a_zone):
-                profile_b[x] = mean_y + top
-                del profile_a[x]
+        # Dotted / dashed segment → proposed grade
+        if 3 <= w <= 45 and 2 <= h <= 12 and aspect_ratio > 1.0:
+            proposed_mask[labels == i] = 255
+            continue
 
-    # Wider profile = existing ground (dashed, spans full width)
-    if len(profile_b) > len(profile_a):
-        profile_a, profile_b = profile_b, profile_a
+        # Long solid component → existing ground
+        if diag_len > 55 or w > 50 or h > 50:
+            existing_mask[labels == i] = 255
+            continue
+
+        # Everything else (numbers, symbols) → ignore
+
+    # ── Step 5: build x→y profiles ───────────────────────────────────────────
+    profile_a = _profile_from_mask(existing_mask)   # existing ground (red in debug)
+    profile_b = _profile_from_mask(proposed_mask)   # proposed grade  (orange in debug)
+
+    print(f"BW DEBUG: existing cols={len(profile_a)}  proposed cols={len(profile_b)}")
 
     return profile_a, profile_b
 
@@ -292,13 +272,16 @@ def calculate_area(img_bytes: bytes) -> dict:
             return {"error": "Could not decode image"}
 
         import inspect
-        print("FILE:", inspect.getfile(calculate_area))    
+        print("FILE:", inspect.getfile(calculate_area))
+
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         hsv  = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
+        # ── Grid scale FIRST on raw gray ──────────────────────────────────────
         grid_px     = _detect_grid_px(gray)
         px_per_sqft = (grid_px ** 2) / 100.0
 
+        # ── Line detection ────────────────────────────────────────────────────
         if _is_colored(hsv):
             profile_a, profile_b = _profiles_colored(hsv)
             image_type = "colored"
@@ -358,31 +341,31 @@ def generate_debug_image(img_bytes: bytes) -> bytes:
 
     vis = img.copy()
 
-    # Grid lines
+    # ── Grid lines overlay ────────────────────────────────────────────────────
     grid_mask = cv2.inRange(gray, 175, 225)
     col_sums  = grid_mask.sum(axis=0).astype(float)
     row_sums  = grid_mask.sum(axis=1).astype(float)
 
-    v_peaks, _ = find_peaks(col_sums, height=col_sums.max()*0.5, distance=8)
-    h_peaks, _ = find_peaks(row_sums, height=row_sums.max()*0.5, distance=8)
+    v_peaks, _ = find_peaks(col_sums, height=col_sums.max() * 0.5, distance=8)
+    h_peaks, _ = find_peaks(row_sums, height=row_sums.max() * 0.5, distance=8)
 
     for x in v_peaks:
         cv2.line(vis, (int(x), 0), (int(x), h), (0, 200, 0), 1)
     for y in h_peaks:
         cv2.line(vis, (0, int(y)), (w, int(y)), (200, 0, 0), 1)
 
-    # Highlighted grid square using correct grid_px
+    # ── Highlighted grid square ───────────────────────────────────────────────
     grid_px = _detect_grid_px(gray)
-    if len(h_peaks) >= 2:
-        x1 = int(v_peaks[0]) if len(v_peaks) >= 1 else 21
+    if len(h_peaks) >= 2 and len(v_peaks) >= 1:
+        x1 = int(v_peaks[0])
         x2 = x1 + int(grid_px)
         y1, y2 = int(h_peaks[0]), int(h_peaks[1])
         cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 255), 2)
         cv2.putText(vis, f"{int(grid_px)}x{int(grid_px)}px = 100 sqft",
-                    (x1+2, y1+(y2-y1)//2),
+                    (x1 + 2, y1 + (y2 - y1) // 2),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
 
-    # Line profiles
+    # ── Line profiles ─────────────────────────────────────────────────────────
     if _is_colored(hsv):
         profile_a, profile_b = _profiles_colored(hsv)
     else:
@@ -391,14 +374,14 @@ def generate_debug_image(img_bytes: bytes) -> bytes:
     for x, y in profile_a.items():
         iy = int(round(y))
         if 0 <= iy < h:
-            cv2.circle(vis, (x, iy), 1, (0, 0, 255), -1)
+            cv2.circle(vis, (x, iy), 1, (0, 0, 255), -1)      # red = existing ground
 
     for x, y in profile_b.items():
         iy = int(round(y))
         if 0 <= iy < h:
-            cv2.circle(vis, (x, iy), 1, (0, 165, 255), -1)
+            cv2.circle(vis, (x, iy), 1, (0, 165, 255), -1)    # orange = proposed grade
 
-    # Cyan fill between lines
+    # ── Cyan fill between lines ───────────────────────────────────────────────
     overlay  = vis.copy()
     common_x = sorted(set(profile_a.keys()) & set(profile_b.keys()))
     for x in common_x:
@@ -411,13 +394,14 @@ def generate_debug_image(img_bytes: bytes) -> bytes:
 
     cv2.addWeighted(overlay, 0.5, vis, 0.5, 0, vis)
 
+    # ── Legend ────────────────────────────────────────────────────────────────
     legend_y = 12
     for color, text in [
-        ((0,200,0),   "Green = grid lines"),
-        ((0,0,255),   "Red   = line 1 (existing)"),
-        ((0,165,255), "Orange= line 2 (proposed)"),
-        ((255,255,0), "Cyan  = enclosed area"),
-        ((0,255,255), "Yellow box = 1 grid square = 100 sqft"),
+        ((0, 200, 0),   "Green  = grid lines"),
+        ((0, 0, 255),   "Red    = line 1 (existing ground)"),
+        ((0, 165, 255), "Orange = line 2 (proposed grade)"),
+        ((255, 255, 0), "Cyan   = enclosed area"),
+        ((0, 255, 255), "Yellow box = 1 grid square = 100 sqft"),
     ]:
         cv2.putText(vis, text, (5, legend_y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.32, color, 1)
