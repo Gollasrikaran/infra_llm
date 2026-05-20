@@ -8,11 +8,12 @@ import streamlit as st
 from agent import extract_image_data_from_bytes
 from dotenv import load_dotenv
 from PIL import Image
+st.cache_data.clear()
 
 load_dotenv()
 
 st.set_page_config(page_title="Cross-Section Analyzer", page_icon="🛣️", layout="wide")
-st.cache_data.clear()
+
 
 st.markdown("""
 <style>
@@ -411,6 +412,8 @@ with col_right:
 
         # ── OpenCV area (runs immediately, no API call) ──────────────────────
         with st.spinner("📐 Measuring pixel area with OpenCV..."):
+            import importlib, area_calculator
+            importlib.reload(area_calculator)
             from area_calculator import generate_debug_image, crop_to_drawing, calculate_area
             img_bytes_cropped = crop_to_drawing(img_bytes)   # ← removes empty whitespace
             cv_result = calculate_area(img_bytes_cropped)
