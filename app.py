@@ -365,90 +365,146 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"], label_visibility="collapsed")
+tab1, tab2 = st.tabs(["📄 PDF Analysis", "🖼️ Direct Image → Gemini"])
 
-if not uploaded_pdf:
-    st.markdown("""
-    <div style="text-align:center;padding:3rem;color:#4a6080;">
-        <div style="font-size:3rem">📄</div>
-        <p style="margin-top:.8rem">Drop your highway engineering PDF above to get started</p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
+with tab1:
 
-pdf_bytes = uploaded_pdf.read()
+    uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"], label_visibility="collapsed")
 
-with st.spinner("Reading PDF..."):
-    total_pages = get_page_count(pdf_bytes)
-
-st.markdown(f"""
-<div class="metric-row">
-    <div class="metric-box"><div class="val">{total_pages}</div><div class="lbl">Total Pages</div></div>
-    <div class="metric-box"><div class="val">{total_pages * 5}</div><div class="lbl">Est. Cross-Sections</div></div>
-    <div class="metric-box"><div class="val">Gemini + OpenCV</div><div class="lbl">Analysis Engine</div></div>
-</div>
-""", unsafe_allow_html=True)
-
-col_left, col_right = st.columns([1, 2])
-
-with col_left:
-    st.markdown('<div class="section-hdr">Page Selection</div>', unsafe_allow_html=True)
-    selected_page = st.selectbox("Page", options=list(range(1, total_pages + 1)),
-                                 format_func=lambda x: f"Page {x}",
-                                 label_visibility="collapsed")
-    page_index = selected_page - 1
-
-    with st.spinner(f"Rendering page {selected_page}..."):
-        img_bytes = render_page(pdf_bytes, page_index, dpi=150)
-
-    image = Image.open(io.BytesIO(img_bytes))
-    st.image(image, caption=f"Page {selected_page}", use_container_width=True)
-    analyze_clicked = st.button("🔍 Analyze This Page", use_container_width=True)
-
-with col_right:
-    st.markdown('<div class="section-hdr">Analysis Result</div>', unsafe_allow_html=True)
-
-    if analyze_clicked:
-
-        # # ── OpenCV area (runs immediately, no API call) ──────────────────────
-        # with st.spinner("📐 Measuring pixel area with OpenCV..."):
-        #     import importlib, area_calculator
-        #     importlib.reload(area_calculator)
-        #     from area_calculator import generate_debug_image, crop_to_drawing, calculate_area
-        #     img_bytes_cropped = crop_to_drawing(img_bytes)   # ← removes empty whitespace
-        #     cv_result = calculate_area(img_bytes_cropped)
-        #     debug_png = generate_debug_image(img_bytes_cropped)
-        # render_opencv_result(cv_result)
-
-        # # ── Debug visualization ───────────────────────────────────────────────
-        # st.markdown('<div class="section-hdr">🔍 OpenCV Detection Visualization</div>',
-        #             unsafe_allow_html=True)
-        # st.image(debug_png,
-        #          caption="Green=grid lines | Red=line1 | Orange=line2 | Cyan=enclosed area | Yellow=1 grid square(100 sqft)",
-        #          use_container_width=True)
-
-        st.markdown('<div class="section-hdr" style="margin-top:2rem">Gemini Vision Analysis</div>',
-                    unsafe_allow_html=True)
-
-        # ── Gemini labels, station, CUT/FILL, slopes ────────────────────────
-        with st.spinner("🤖 Sending to Gemini Vision..."):
-            raw_result = extract_image_data_from_bytes(img_bytes)
-
-        parsed = parse_result(raw_result)
-        if parsed:
-            render_result(parsed)
-        else:
-            st.warning("Could not parse JSON from Gemini response.")
-            st.code(raw_result, language="json")
-
-    else:
+    if not uploaded_pdf:
         st.markdown("""
-        <div style="text-align:center;padding:4rem 2rem;color:#4a6080;
-                    border:1px dashed #2a3f5a;border-radius:10px;">
-            <div style="font-size:2.5rem">📊</div>
-            <p style="margin-top:.8rem;font-size:.9rem">
-                Select a page and click<br>
-                <strong style="color:#7eb8f7">Analyze This Page</strong>
-            </p>
+        <div style="text-align:center;padding:3rem;color:#4a6080;">
+            <div style="font-size:3rem">📄</div>
+            <p style="margin-top:.8rem">Drop your highway engineering PDF above to get started</p>
         </div>
         """, unsafe_allow_html=True)
+    else:
+
+        pdf_bytes = uploaded_pdf.read()
+
+        with st.spinner("Reading PDF..."):
+            total_pages = get_page_count(pdf_bytes)
+
+        st.markdown(f"""
+        <div class="metric-row">
+            <div class="metric-box"><div class="val">{total_pages}</div><div class="lbl">Total Pages</div></div>
+            <div class="metric-box"><div class="val">{total_pages * 5}</div><div class="lbl">Est. Cross-Sections</div></div>
+            <div class="metric-box"><div class="val">Gemini + OpenCV</div><div class="lbl">Analysis Engine</div></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_left, col_right = st.columns([1, 2])
+
+        with col_left:
+            st.markdown('<div class="section-hdr">Page Selection</div>', unsafe_allow_html=True)
+            selected_page = st.selectbox("Page", options=list(range(1, total_pages + 1)),
+                                        format_func=lambda x: f"Page {x}",
+                                        label_visibility="collapsed")
+            page_index = selected_page - 1
+
+            with st.spinner(f"Rendering page {selected_page}..."):
+                img_bytes = render_page(pdf_bytes, page_index, dpi=150)
+
+            image = Image.open(io.BytesIO(img_bytes))
+            st.image(image, caption=f"Page {selected_page}", use_container_width=True)
+            analyze_clicked = st.button("🔍 Analyze This Page", use_container_width=True)
+
+        with col_right:
+            st.markdown('<div class="section-hdr">Analysis Result</div>', unsafe_allow_html=True)
+
+            if analyze_clicked:
+
+                # # ── OpenCV area (runs immediately, no API call) ──────────────────────
+                # with st.spinner("📐 Measuring pixel area with OpenCV..."):
+                #     import importlib, area_calculator
+                #     importlib.reload(area_calculator)
+                #     from area_calculator import generate_debug_image, crop_to_drawing, calculate_area
+                #     img_bytes_cropped = crop_to_drawing(img_bytes)   # ← removes empty whitespace
+                #     cv_result = calculate_area(img_bytes_cropped)
+                #     debug_png = generate_debug_image(img_bytes_cropped)
+                # render_opencv_result(cv_result)
+
+                # # ── Debug visualization ───────────────────────────────────────────────
+                # st.markdown('<div class="section-hdr">🔍 OpenCV Detection Visualization</div>',
+                #             unsafe_allow_html=True)
+                # st.image(debug_png,
+                #          caption="Green=grid lines | Red=line1 | Orange=line2 | Cyan=enclosed area | Yellow=1 grid square(100 sqft)",
+                #          use_container_width=True)
+
+                st.markdown('<div class="section-hdr" style="margin-top:2rem">Gemini Vision Analysis</div>',
+                            unsafe_allow_html=True)
+
+                # ── Gemini labels, station, CUT/FILL, slopes ────────────────────────
+                with st.spinner("🤖 Sending to Gemini Vision..."):
+                    raw_result = extract_image_data_from_bytes(img_bytes)
+
+                parsed = parse_result(raw_result)
+                if parsed:
+                    render_result(parsed)
+                else:
+                    st.warning("Could not parse JSON from Gemini response.")
+                    st.code(raw_result, language="json")
+
+            else:
+                st.markdown("""
+                <div style="text-align:center;padding:4rem 2rem;color:#4a6080;
+                            border:1px dashed #2a3f5a;border-radius:10px;">
+                    <div style="font-size:2.5rem">📊</div>
+                    <p style="margin-top:.8rem;font-size:.9rem">
+                        Select a page and click<br>
+                        <strong style="color:#7eb8f7">Analyze This Page</strong>
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+
+with tab2:
+    st.markdown('<div class="section-hdr">Upload a PNG/JPG cross-section image</div>',
+                unsafe_allow_html=True)
+
+    uploaded_img = st.file_uploader(
+        "Upload Image", type=["png", "jpg", "jpeg"],
+        label_visibility="collapsed", key="img_uploader"
+    )
+
+    if not uploaded_img:
+        st.markdown("""
+        <div style="text-align:center;padding:3rem;color:#4a6080;">
+            <div style="font-size:3rem">🖼️</div>
+            <p style="margin-top:.8rem">Drop a PNG or JPG cross-section image above</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        img_bytes_direct = uploaded_img.read()
+        col_l, col_r = st.columns([1, 2])
+
+        with col_l:
+            st.markdown('<div class="section-hdr">Uploaded Image</div>', unsafe_allow_html=True)
+            image = Image.open(io.BytesIO(img_bytes_direct))
+            st.image(image, caption=uploaded_img.name, use_container_width=True)
+            analyze_img_clicked = st.button(
+                "🔍 Analyze with Gemini", use_container_width=True, key="analyze_img_btn"
+            )
+
+        with col_r:
+            st.markdown('<div class="section-hdr">Gemini Vision Analysis</div>',
+                        unsafe_allow_html=True)
+            if analyze_img_clicked:
+                with st.spinner("🤖 Sending to Gemini Vision..."):
+                    raw_result = extract_image_data_from_bytes(img_bytes_direct)
+                parsed = parse_result(raw_result)
+                if parsed:
+                    render_result(parsed)
+                else:
+                    st.warning("Could not parse JSON from Gemini response.")
+                    st.code(raw_result, language="json")
+            else:
+                st.markdown("""
+                <div style="text-align:center;padding:4rem 2rem;color:#4a6080;
+                            border:1px dashed #2a3f5a;border-radius:10px;">
+                    <div style="font-size:2.5rem">📊</div>
+                    <p style="margin-top:.8rem;font-size:.9rem">
+                        Upload an image and click<br>
+                        <strong style="color:#7eb8f7">Analyze with Gemini</strong>
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
