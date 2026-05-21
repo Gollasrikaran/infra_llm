@@ -102,113 +102,113 @@ def _safe_width(lx, rx) -> str:
         return "—"
 
 
-# =========================
-# OPENCV RESULT RENDERER
-# =========================
+# # =========================
+# # OPENCV RESULT RENDERER
+# # =========================
 
-def render_opencv_result(cv_data: dict):
-    """Render the OpenCV pixel-based area calculation results."""
+# def render_opencv_result(cv_data: dict):
+#     """Render the OpenCV pixel-based area calculation results."""
 
-    if cv_data.get("error"):
-        st.error(f"OpenCV Error: {cv_data['error']}")
-        return
+#     if cv_data.get("error"):
+#         st.error(f"OpenCV Error: {cv_data['error']}")
+#         return
 
-    grid_px    = cv_data.get("grid_px", "—")
-    px_sqft    = cv_data.get("px_per_sqft", "—")
-    regions    = cv_data.get("regions", [])
-    cut_total  = cv_data.get("total_cut_sqft",  0)
-    fill_total = cv_data.get("total_fill_sqft", 0)
-    net        = cv_data.get("net_sqft", 0)
-    net_color  = "#f87171" if net > 0 else "#4ade80" if net < 0 else "#7eb8f7"
+#     grid_px    = cv_data.get("grid_px", "—")
+#     px_sqft    = cv_data.get("px_per_sqft", "—")
+#     regions    = cv_data.get("regions", [])
+#     cut_total  = cv_data.get("total_cut_sqft",  0)
+#     fill_total = cv_data.get("total_fill_sqft", 0)
+#     net        = cv_data.get("net_sqft", 0)
+#     net_color  = "#f87171" if net > 0 else "#4ade80" if net < 0 else "#7eb8f7"
 
-    st.markdown(f"""
-    <div class="opencv-box">
-        <div class="title">📐 OpenCV Pixel-Based Area Measurement</div>
-        <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1rem">
-            <div>
-                <div class="k" style="font-size:.7rem;color:#667788;text-transform:uppercase">Grid Square</div>
-                <div style="color:#7eb8f7;font-family:'IBM Plex Mono';font-size:1rem">
-                    {grid_px}px × {grid_px}px = 100 sq ft
-                </div>
-            </div>
-            <div>
-                <div class="k" style="font-size:.7rem;color:#667788;text-transform:uppercase">Scale</div>
-                <div style="color:#c8d8e8;font-family:'IBM Plex Mono';font-size:1rem">
-                    {px_sqft} px² = 1 sq ft
-                </div>
-            </div>
-            <div>
-                <div class="k" style="font-size:.7rem;color:#667788;text-transform:uppercase">Regions Detected</div>
-                <div style="color:#7eb8f7;font-family:'IBM Plex Mono';font-size:1rem">{len(regions)}</div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+#     st.markdown(f"""
+#     <div class="opencv-box">
+#         <div class="title">📐 OpenCV Pixel-Based Area Measurement</div>
+#         <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1rem">
+#             <div>
+#                 <div class="k" style="font-size:.7rem;color:#667788;text-transform:uppercase">Grid Square</div>
+#                 <div style="color:#7eb8f7;font-family:'IBM Plex Mono';font-size:1rem">
+#                     {grid_px}px × {grid_px}px = 100 sq ft
+#                 </div>
+#             </div>
+#             <div>
+#                 <div class="k" style="font-size:.7rem;color:#667788;text-transform:uppercase">Scale</div>
+#                 <div style="color:#c8d8e8;font-family:'IBM Plex Mono';font-size:1rem">
+#                     {px_sqft} px² = 1 sq ft
+#                 </div>
+#             </div>
+#             <div>
+#                 <div class="k" style="font-size:.7rem;color:#667788;text-transform:uppercase">Regions Detected</div>
+#                 <div style="color:#7eb8f7;font-family:'IBM Plex Mono';font-size:1rem">{len(regions)}</div>
+#             </div>
+#         </div>
+#     </div>
+#     """, unsafe_allow_html=True)
 
-    # Per-region cards
-    for i, r in enumerate(regions, 1):
-        rtype     = r.get("type", "UNKNOWN")
-        area      = r.get("area_sqft", 0)
-        width_px  = r.get("width_px", 0)
+#     # Per-region cards
+#     for i, r in enumerate(regions, 1):
+#         rtype     = r.get("type", "UNKNOWN")
+#         area      = r.get("area_sqft", 0)
+#         width_px  = r.get("width_px", 0)
 
-        if rtype == "CUT":
-            card_cls, color_cls, icon = "result-cut",  "cut-color",  "🔴"
-            desc = "Proposed grade is BELOW existing ground — excavation needed"
-        elif rtype == "FILL":
-            card_cls, color_cls, icon = "result-fill", "fill-color", "🟢"
-            desc = "Proposed grade is ABOVE existing ground — fill material needed"
-        else:
-            card_cls, color_cls, icon = "result-unk",  "",           "⚪"
-            desc = "Undetermined"
+#         if rtype == "CUT":
+#             card_cls, color_cls, icon = "result-cut",  "cut-color",  "🔴"
+#             desc = "Proposed grade is BELOW existing ground — excavation needed"
+#         elif rtype == "FILL":
+#             card_cls, color_cls, icon = "result-fill", "fill-color", "🟢"
+#             desc = "Proposed grade is ABOVE existing ground — fill material needed"
+#         else:
+#             card_cls, color_cls, icon = "result-unk",  "",           "⚪"
+#             desc = "Undetermined"
 
-        st.markdown(f"""
-        <div class="{card_cls}">
-            <div style="font-size:.68rem;color:#667788;text-transform:uppercase;
-                        letter-spacing:.1em;margin-bottom:.3rem">Region {i}</div>
-            <div class="result-type {color_cls}">{icon} {rtype}</div>
-            <div style="color:#8899aa;font-size:.85rem;margin-bottom:.8rem">{desc}</div>
-            <div class="info-grid">
-                <div class="info-item">
-                    <div class="k">Width</div>
-                    <div class="v">{width_px} px</div>
-                </div>
-                <div class="info-item">
-                    <div class="k">Area (OpenCV)</div>
-                    <div class="v" style="font-size:1.1rem;color:#7eb8f7;font-family:'IBM Plex Mono'">
-                        {area:,.2f} sq ft
-                    </div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+#         st.markdown(f"""
+#         <div class="{card_cls}">
+#             <div style="font-size:.68rem;color:#667788;text-transform:uppercase;
+#                         letter-spacing:.1em;margin-bottom:.3rem">Region {i}</div>
+#             <div class="result-type {color_cls}">{icon} {rtype}</div>
+#             <div style="color:#8899aa;font-size:.85rem;margin-bottom:.8rem">{desc}</div>
+#             <div class="info-grid">
+#                 <div class="info-item">
+#                     <div class="k">Width</div>
+#                     <div class="v">{width_px} px</div>
+#                 </div>
+#                 <div class="info-item">
+#                     <div class="k">Area (OpenCV)</div>
+#                     <div class="v" style="font-size:1.1rem;color:#7eb8f7;font-family:'IBM Plex Mono'">
+#                         {area:,.2f} sq ft
+#                     </div>
+#                 </div>
+#             </div>
+#         </div>
+#         """, unsafe_allow_html=True)
 
-    # Summary
-    st.markdown(f"""
-    <div style="background:#1a2332;border:1px solid #2a3f5a;border-radius:10px;
-                padding:1rem 1.2rem;margin-top:1.5rem;">
-        <div class="section-hdr" style="margin-top:0">OpenCV Summary</div>
-        <div style="display:flex;gap:2.5rem;flex-wrap:wrap;margin-top:.6rem">
-            <div>
-                <div style="font-size:.7rem;color:#667788;text-transform:uppercase">Total CUT</div>
-                <div style="font-size:1.4rem;font-weight:600;color:#f87171;font-family:'IBM Plex Mono'">
-                    {cut_total:,.2f} sq ft
-                </div>
-            </div>
-            <div>
-                <div style="font-size:.7rem;color:#667788;text-transform:uppercase">Total FILL</div>
-                <div style="font-size:1.4rem;font-weight:600;color:#4ade80;font-family:'IBM Plex Mono'">
-                    {fill_total:,.2f} sq ft
-                </div>
-            </div>
-            <div>
-                <div style="font-size:.7rem;color:#667788;text-transform:uppercase">Net (CUT − FILL)</div>
-                <div style="font-size:1.4rem;font-weight:600;color:{net_color};font-family:'IBM Plex Mono'">
-                    {net:+,.2f} sq ft
-                </div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+#     # Summary
+#     st.markdown(f"""
+#     <div style="background:#1a2332;border:1px solid #2a3f5a;border-radius:10px;
+#                 padding:1rem 1.2rem;margin-top:1.5rem;">
+#         <div class="section-hdr" style="margin-top:0">OpenCV Summary</div>
+#         <div style="display:flex;gap:2.5rem;flex-wrap:wrap;margin-top:.6rem">
+#             <div>
+#                 <div style="font-size:.7rem;color:#667788;text-transform:uppercase">Total CUT</div>
+#                 <div style="font-size:1.4rem;font-weight:600;color:#f87171;font-family:'IBM Plex Mono'">
+#                     {cut_total:,.2f} sq ft
+#                 </div>
+#             </div>
+#             <div>
+#                 <div style="font-size:.7rem;color:#667788;text-transform:uppercase">Total FILL</div>
+#                 <div style="font-size:1.4rem;font-weight:600;color:#4ade80;font-family:'IBM Plex Mono'">
+#                     {fill_total:,.2f} sq ft
+#                 </div>
+#             </div>
+#             <div>
+#                 <div style="font-size:.7rem;color:#667788;text-transform:uppercase">Net (CUT − FILL)</div>
+#                 <div style="font-size:1.4rem;font-weight:600;color:{net_color};font-family:'IBM Plex Mono'">
+#                     {net:+,.2f} sq ft
+#                 </div>
+#             </div>
+#         </div>
+#     </div>
+#     """, unsafe_allow_html=True)
 
 
 # =========================
@@ -410,22 +410,22 @@ with col_right:
 
     if analyze_clicked:
 
-        # ── OpenCV area (runs immediately, no API call) ──────────────────────
-        with st.spinner("📐 Measuring pixel area with OpenCV..."):
-            import importlib, area_calculator
-            importlib.reload(area_calculator)
-            from area_calculator import generate_debug_image, crop_to_drawing, calculate_area
-            img_bytes_cropped = crop_to_drawing(img_bytes)   # ← removes empty whitespace
-            cv_result = calculate_area(img_bytes_cropped)
-            debug_png = generate_debug_image(img_bytes_cropped)
-        render_opencv_result(cv_result)
+        # # ── OpenCV area (runs immediately, no API call) ──────────────────────
+        # with st.spinner("📐 Measuring pixel area with OpenCV..."):
+        #     import importlib, area_calculator
+        #     importlib.reload(area_calculator)
+        #     from area_calculator import generate_debug_image, crop_to_drawing, calculate_area
+        #     img_bytes_cropped = crop_to_drawing(img_bytes)   # ← removes empty whitespace
+        #     cv_result = calculate_area(img_bytes_cropped)
+        #     debug_png = generate_debug_image(img_bytes_cropped)
+        # render_opencv_result(cv_result)
 
-        # ── Debug visualization ───────────────────────────────────────────────
-        st.markdown('<div class="section-hdr">🔍 OpenCV Detection Visualization</div>',
-                    unsafe_allow_html=True)
-        st.image(debug_png,
-                 caption="Green=grid lines | Red=line1 | Orange=line2 | Cyan=enclosed area | Yellow=1 grid square(100 sqft)",
-                 use_container_width=True)
+        # # ── Debug visualization ───────────────────────────────────────────────
+        # st.markdown('<div class="section-hdr">🔍 OpenCV Detection Visualization</div>',
+        #             unsafe_allow_html=True)
+        # st.image(debug_png,
+        #          caption="Green=grid lines | Red=line1 | Orange=line2 | Cyan=enclosed area | Yellow=1 grid square(100 sqft)",
+        #          use_container_width=True)
 
         st.markdown('<div class="section-hdr" style="margin-top:2rem">Gemini Vision Analysis</div>',
                     unsafe_allow_html=True)
