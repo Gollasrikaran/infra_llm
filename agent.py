@@ -55,6 +55,11 @@ For each region, check which line is higher INSIDE that region:
 Do NOT rely on x=0 alone — a region entirely on the left side (e.g. x=-50 to x=-10)
 can still be CUT or FILL based on which line is higher within that specific zone.
 
+Also note which side of the centerline (x=0) the region falls on:
+  - Both catch points x < 0 → side = "LEFT"
+  - Both catch points x > 0 → side = "RIGHT"  
+  - One negative, one positive → side = "CROSSES_CENTERLINE"
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 4 — CALCULATE AREA FOR EACH REGION (Trapezoidal Method)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -88,6 +93,7 @@ OUTPUT — Respond ONLY with valid JSON, no markdown, no code fences, no extra t
     {
       "id": 1,
       "type": "CUT or FILL",
+      "side": "LEFT or RIGHT or CROSSES_CENTERLINE",
       "left_catch_point":  {"x": <ft>, "elevation": <ft>},
       "right_catch_point": {"x": <ft>, "elevation": <ft>},
       "area_calculation": {

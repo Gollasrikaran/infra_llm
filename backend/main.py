@@ -1,12 +1,11 @@
 """
 FastAPI backend for the Highway Cross-Section Analyzer.
-Replaces the Streamlit server with REST endpoints.
+Handles PDF uploads, page rendering, and Gemini Vision analysis.
 """
 
 import os
 import sys
 import re
-import io
 import json
 import uuid
 
@@ -17,15 +16,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# ── Add parent dir to path so we can import agent.py, etc. ────────────────────
+# need the parent dir on the path so we can pull in agent.py
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from agent import extract_image_data_from_bytes  # noqa: E402
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
-
-# ══════════════════════════════════════════════════════════════════════════════
-# APP SETUP
-# ══════════════════════════════════════════════════════════════════════════════
 
 app = FastAPI(
     title="Cross-Section Analyzer API",
@@ -41,26 +36,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── In-memory PDF storage ─────────────────────────────────────────────────────
-_pdf_store: dict[str, bytes] = {}
+# PDF bytes stored in memory, keyed by file_id
+pdf_cache: dict[str, bytes] = {}
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HELPERS
-# ══════════════════════════════════════════════════════════════════════════════
+# --- helpers ---
 
-def _get_page_count(pdf_bytes: bytes) -> int:
+def count_pages(pdf_bytes: bytes) -> int:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     n = len(doc)
     doc.close()
     return n
 
 
-def _render_page(pdf_bytes: bytes, page_index: int, dpi: int = 150) -> bytes:
+def render_page_png(pdf_bytes: bytes, page_index: int, dpi: int = 150) -> bytes:
+    """Renders a single page to PNG bytes. Caps resolution to ~3M pixels."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     page = doc.load_page(page_index)
     rect = page.rect
     scale = dpi / 72
+    # don't blow up memory on huge pages
     if (rect.width * scale) * (rect.height * scale) > 3_000_000:
         scale = (3_000_000 / (rect.width * rect.height)) ** 0.5
     pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
@@ -69,8 +64,8 @@ def _render_page(pdf_bytes: bytes, page_index: int, dpi: int = 150) -> bytes:
     return img_bytes
 
 
-def _parse_result(raw: str) -> dict | None:
-    """Strip markdown fences and parse JSON from Gemini response."""
+def try_parse_json(raw: str) -> dict | None:
+    """Try to extract JSON from a Gemini response (strips markdown fences)."""
     try:
         clean = re.sub(r"```(?:json)?|```", "", raw).strip()
         return json.loads(clean)
@@ -78,9 +73,7 @@ def _parse_result(raw: str) -> dict | None:
         return None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# MODELS
-# ══════════════════════════════════════════════════════════════════════════════
+# --- request/response models ---
 
 class UploadResponse(BaseModel):
     file_id: str
@@ -100,9 +93,7 @@ class AnalysisResponse(BaseModel):
     error: str | None = None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ENDPOINTS
-# ══════════════════════════════════════════════════════════════════════════════
+# --- endpoints ---
 
 @app.get("/api/health")
 async def health_check():
@@ -111,19 +102,19 @@ async def health_check():
 
 @app.post("/api/upload-pdf", response_model=UploadResponse)
 async def upload_pdf(file: UploadFile = File(...)):
-    """Upload a PDF and store it in memory. Returns file_id and page count."""
+    """Upload a PDF, store it in memory, return a file_id + page count."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
 
     pdf_bytes = await file.read()
 
     try:
-        total_pages = _get_page_count(pdf_bytes)
+        total_pages = count_pages(pdf_bytes)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid PDF: {str(e)}")
 
     file_id = str(uuid.uuid4())
-    _pdf_store[file_id] = pdf_bytes
+    pdf_cache[file_id] = pdf_bytes
 
     return UploadResponse(
         file_id=file_id,
@@ -134,12 +125,12 @@ async def upload_pdf(file: UploadFile = File(...)):
 
 @app.get("/api/pdf/{file_id}/page/{page_num}")
 async def get_pdf_page(file_id: str, page_num: int):
-    """Render a specific PDF page as a PNG image."""
-    if file_id not in _pdf_store:
+    """Render one page of a previously-uploaded PDF as PNG."""
+    if file_id not in pdf_cache:
         raise HTTPException(status_code=404, detail="PDF not found. Upload it first.")
 
-    pdf_bytes = _pdf_store[file_id]
-    total_pages = _get_page_count(pdf_bytes)
+    pdf_bytes = pdf_cache[file_id]
+    total_pages = count_pages(pdf_bytes)
 
     if page_num < 1 or page_num > total_pages:
         raise HTTPException(
@@ -147,18 +138,18 @@ async def get_pdf_page(file_id: str, page_num: int):
             detail=f"Page {page_num} out of range (1-{total_pages})",
         )
 
-    img_bytes = _render_page(pdf_bytes, page_num - 1)
+    img_bytes = render_page_png(pdf_bytes, page_num - 1)
     return Response(content=img_bytes, media_type="image/png")
 
 
 @app.post("/api/analyze/pdf-page", response_model=AnalysisResponse)
 async def analyze_pdf_page(request: AnalyzePageRequest):
-    """Render a PDF page and send it to Gemini Vision for analysis."""
-    if request.file_id not in _pdf_store:
+    """Render a PDF page then send it to Gemini for cross-section analysis."""
+    if request.file_id not in pdf_cache:
         raise HTTPException(status_code=404, detail="PDF not found. Upload it first.")
 
-    pdf_bytes = _pdf_store[request.file_id]
-    total_pages = _get_page_count(pdf_bytes)
+    pdf_bytes = pdf_cache[request.file_id]
+    total_pages = count_pages(pdf_bytes)
 
     if request.page_num < 1 or request.page_num > total_pages:
         raise HTTPException(
@@ -166,14 +157,14 @@ async def analyze_pdf_page(request: AnalyzePageRequest):
             detail=f"Page {request.page_num} out of range (1-{total_pages})",
         )
 
-    img_bytes = _render_page(pdf_bytes, request.page_num - 1)
+    img_bytes = render_page_png(pdf_bytes, request.page_num - 1)
 
     try:
         raw_result = extract_image_data_from_bytes(img_bytes)
     except Exception as e:
         return AnalysisResponse(success=False, error=f"Gemini API error: {str(e)}")
 
-    parsed = _parse_result(raw_result)
+    parsed = try_parse_json(raw_result)
     if parsed:
         return AnalysisResponse(success=True, data=parsed, raw=raw_result)
     else:
@@ -186,9 +177,9 @@ async def analyze_pdf_page(request: AnalyzePageRequest):
 
 @app.post("/api/analyze/image", response_model=AnalysisResponse)
 async def analyze_image(file: UploadFile = File(...)):
-    """Accept a PNG/JPG image and send it directly to Gemini Vision."""
-    allowed_types = (".png", ".jpg", ".jpeg")
-    if not file.filename.lower().endswith(allowed_types):
+    """Accept an image file and send it straight to Gemini Vision."""
+    allowed = (".png", ".jpg", ".jpeg")
+    if not file.filename.lower().endswith(allowed):
         raise HTTPException(
             status_code=400, detail="Only PNG, JPG, JPEG files are accepted"
         )
@@ -200,7 +191,7 @@ async def analyze_image(file: UploadFile = File(...)):
     except Exception as e:
         return AnalysisResponse(success=False, error=f"Gemini API error: {str(e)}")
 
-    parsed = _parse_result(raw_result)
+    parsed = try_parse_json(raw_result)
     if parsed:
         return AnalysisResponse(success=True, data=parsed, raw=raw_result)
     else:
@@ -213,8 +204,8 @@ async def analyze_image(file: UploadFile = File(...)):
 
 @app.delete("/api/pdf/{file_id}")
 async def delete_pdf(file_id: str):
-    """Remove a PDF from in-memory storage."""
-    if file_id in _pdf_store:
-        del _pdf_store[file_id]
+    """Remove a PDF from the in-memory cache."""
+    if file_id in pdf_cache:
+        del pdf_cache[file_id]
         return {"status": "deleted", "file_id": file_id}
     raise HTTPException(status_code=404, detail="PDF not found")

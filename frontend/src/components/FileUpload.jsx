@@ -2,13 +2,13 @@ import { useState, useRef } from 'react';
 
 export default function FileUpload({ accept, label, hint, onFileSelected, file }) {
   const [dragOver, setDragOver] = useState(false);
-  const inputRef = useRef(null);
+  const fileInput = useRef(null);
 
   const handleDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile) onFileSelected(droppedFile);
+    const dropped = e.dataTransfer.files[0];
+    if (dropped) onFileSelected(dropped);
   };
 
   const handleDragOver = (e) => {
@@ -16,17 +16,15 @@ export default function FileUpload({ accept, label, hint, onFileSelected, file }
     setDragOver(true);
   };
 
-  const handleDragLeave = () => setDragOver(false);
-
   const handleChange = (e) => {
-    const selected = e.target.files[0];
-    if (selected) onFileSelected(selected);
+    const picked = e.target.files[0];
+    if (picked) onFileSelected(picked);
   };
 
   const handleRemove = (e) => {
     e.stopPropagation();
     onFileSelected(null);
-    if (inputRef.current) inputRef.current.value = '';
+    if (fileInput.current) fileInput.current.value = '';
   };
 
   const formatSize = (bytes) => {
@@ -41,11 +39,11 @@ export default function FileUpload({ accept, label, hint, onFileSelected, file }
         className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onClick={() => inputRef.current?.click()}
+        onDragLeave={() => setDragOver(false)}
+        onClick={() => fileInput.current?.click()}
       >
         <input
-          ref={inputRef}
+          ref={fileInput}
           type="file"
           accept={accept}
           onChange={handleChange}

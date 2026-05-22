@@ -1,10 +1,7 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   DESIGN SYSTEM — Cross-Section Analyzer
-   Light corporate dashboard theme (inspired by reference)
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* Design system — Cross-Section Analyzer, light corporate dashboard */
 
 :root {
-  /* ── Core palette ──────────────────────────────────────────────────────── */
+  /* Core palette */
   --bg-page:       #f0f1f5;
   --bg-sidebar:    #ffffff;
   --bg-card:       #ffffff;
@@ -15,13 +12,13 @@
   --border-light:   #e8e9ed;
   --border-default: #dcdde2;
 
-  /* ── Text ──────────────────────────────────────────────────────────────── */
+  /* Text */
   --text-primary:    #1a1d26;
   --text-secondary:  #6b7080;
   --text-muted:      #9ca3b0;
   --text-heading:    #1a1d26;
 
-  /* ── Accent — soft muted palette ───────────────────────────────────────── */
+  /* Accent — soft muted palette */
   --accent-green:     #c8e6c9;
   --accent-green-dark:#4caf50;
   --accent-mint:      #e0f2f1;
@@ -33,7 +30,7 @@
   --accent-purple:    #e1bee7;
   --accent-purple-dark:#ab47bc;
 
-  /* ── Semantic — CUT / FILL ─────────────────────────────────────────────── */
+  /* Semantic — CUT / FILL */
   --cut-color:      #e53935;
   --cut-bg:         #ffebee;
   --cut-border:     #ffcdd2;
@@ -41,32 +38,30 @@
   --fill-bg:        #e8f5e9;
   --fill-border:    #c8e6c9;
 
-  /* ── Pill / Tab ────────────────────────────────────────────────────────── */
+  /* Pill / Tab */
   --tab-active-bg:    #1a1d26;
   --tab-active-text:  #ffffff;
   --tab-inactive-bg:  transparent;
   --tab-inactive-text:#6b7080;
 
-  /* ── Typography ────────────────────────────────────────────────────────── */
+  /* Typography */
   --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
 
-  /* ── Spacing & Radius ──────────────────────────────────────────────────── */
+  /* Spacing & radius */
   --radius-sm:  8px;
   --radius-md:  12px;
   --radius-lg:  16px;
   --radius-xl:  20px;
   --radius-pill: 50px;
 
-  /* ── Shadows ───────────────────────────────────────────────────────────── */
+  /* Shadows */
   --shadow-card:     0 1px 3px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.03);
   --shadow-elevated: 0 4px 16px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04);
   --shadow-hover:    0 6px 24px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   GLOBAL RESET + BASE
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* Global reset */
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -95,9 +90,7 @@ body {
   display: flex;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   TYPOGRAPHY
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* Typography */
 
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-sans);
@@ -110,9 +103,7 @@ code, .mono {
   font-family: var(--font-mono);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   SCROLLBAR
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* Scrollbar */
 
 ::-webkit-scrollbar {
   width: 6px;
@@ -129,9 +120,7 @@ code, .mono {
   background: rgba(0, 0, 0, 0.18);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   ANIMATIONS
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* Animations */
 
 @keyframes fadeInUp {
   from {

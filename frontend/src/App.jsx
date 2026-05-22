@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
+import LoginPage from './components/LoginPage';
 import FileUpload from './components/FileUpload';
 import MetricCard from './components/MetricCard';
 import PageSelector from './components/PageSelector';
@@ -8,9 +9,7 @@ import LoadingSkeleton from './components/LoadingSkeleton';
 
 const API_BASE = '/api';
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   HOME PAGE
-   ═══════════════════════════════════════════════════════════════════════════ */
+// --- Home Page ---
 
 function HomePage({ onNavigate }) {
   return (
@@ -22,7 +21,6 @@ function HomePage({ onNavigate }) {
       </div>
       <h1 className="page-title">Cross-Section Analyzer</h1>
 
-      {/* Welcome banner */}
       <div className="home-banner fade-in-up">
         <div className="home-banner-content">
           <div className="home-banner-badge">🛣️ Highway Engineering AI</div>
@@ -49,7 +47,7 @@ function HomePage({ onNavigate }) {
         </div>
       </div>
 
-      {/* Stats row */}
+      {/* Stats */}
       <div className="home-stats fade-in-up" style={{ animationDelay: '0.1s' }}>
         <div className="home-stat-card">
           <div className="home-stat-icon" style={{ background: '#e3f2fd' }}>📄</div>
@@ -150,19 +148,47 @@ function HomePage({ onNavigate }) {
 }
 
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   MAIN APP
-   ═══════════════════════════════════════════════════════════════════════════ */
+// --- Main App ---
 
 function App() {
-  // ── Navigation ──────────────────────────────────────────────────────────────
+  // auth state
+  const [user, setUser] = useState(() => {
+    try {
+      const stored = localStorage.getItem('cs_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const handleLogin = (userData) => setUser(userData);
+
+  const handleLogout = () => {
+    localStorage.removeItem('cs_user');
+    setUser(null);
+  };
+
+  // nav + UI state
   const [currentPage, setCurrentPage] = useState('home');
   const [activeTab, setActiveTab] = useState('pdf');
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileRef = useRef(null);
 
-  // ── Lightbox ───────────────────────────────────────────────────────────────
-  const [zoomedImage, setZoomedImage] = useState(null); // url | null
+  // close profile dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (profileRef.current && !profileRef.current.contains(e.target)) {
+        setShowProfileMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-  // ── PDF Analysis state ─────────────────────────────────────────────────────
+  // lightbox for zoomed images
+  const [zoomedImage, setZoomedImage] = useState(null);
+
+  // PDF analysis state
   const [pdfFile, setPdfFile] = useState(null);
   const [fileId, setFileId] = useState(null);
   const [totalPages, setTotalPages] = useState(0);
@@ -173,14 +199,14 @@ function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzingPdf, setIsAnalyzingPdf] = useState(false);
 
-  // ── Image Analysis state ───────────────────────────────────────────────────
+  // image analysis state
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [imageResult, setImageResult] = useState(null);
   const [imageError, setImageError] = useState(null);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
 
-  // ── Close lightbox on Escape ───────────────────────────────────────────────
+  // close lightbox on Escape key
   const closeLightbox = useCallback(() => setZoomedImage(null), []);
   useEffect(() => {
     if (!zoomedImage) return;
@@ -189,9 +215,7 @@ function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [zoomedImage, closeLightbox]);
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // PDF UPLOAD
-  // ══════════════════════════════════════════════════════════════════════════
+  // --- PDF upload handler ---
 
   const handlePdfSelected = async (file) => {
     setPdfResult(null);
@@ -235,10 +259,7 @@ function App() {
     }
   };
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // PAGE PREVIEW
-  // ══════════════════════════════════════════════════════════════════════════
-
+  // update preview when page changes
   useEffect(() => {
     if (!fileId || !selectedPage) {
       setPageImageUrl(null);
@@ -249,9 +270,7 @@ function App() {
     setPdfError(null);
   }, [fileId, selectedPage]);
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // ANALYZE PDF PAGE
-  // ══════════════════════════════════════════════════════════════════════════
+  // --- PDF analysis handler ---
 
   const handleAnalyzePdf = async () => {
     if (!fileId || !selectedPage) return;
@@ -286,9 +305,7 @@ function App() {
     }
   };
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // IMAGE UPLOAD + ANALYZE
-  // ══════════════════════════════════════════════════════════════════════════
+  // --- Image upload + analysis ---
 
   const handleImageSelected = (file) => {
     setImageResult(null);
@@ -339,13 +356,15 @@ function App() {
     }
   };
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // RENDER
-  // ══════════════════════════════════════════════════════════════════════════
+  // --- Render ---
+
+  if (!user) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
 
   return (
     <div className="app-layout">
-      {/* ── Sidebar: Home + Analyze ──────────────────────────────────────── */}
+      {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-logo">🛣️</div>
 
@@ -355,8 +374,8 @@ function App() {
           title="Home"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-            <polyline points="9 22 9 12 15 12 15 22"/>
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
           </svg>
           <span className="sidebar-btn-label">Home</span>
         </button>
@@ -367,10 +386,10 @@ function App() {
           title="Analyze"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="12" y1="18" x2="12" y2="12"/>
-            <line x1="9" y1="15" x2="15" y2="15"/>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="12" y1="18" x2="12" y2="12" />
+            <line x1="9" y1="15" x2="15" y2="15" />
           </svg>
           <span className="sidebar-btn-label">Upload</span>
         </button>
@@ -379,28 +398,81 @@ function App() {
 
         <button className="sidebar-btn" title="Help">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
           <span className="sidebar-btn-label">Help</span>
         </button>
       </aside>
 
+      {/* Profile menu (top right) */}
+      <div className="profile-bar">
+        <div className="profile-widget" ref={profileRef}>
+          <button
+            className="profile-trigger"
+            onClick={() => setShowProfileMenu((v) => !v)}
+            title={user.name}
+          >
+            <svg className="profile-trigger-menu" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+            <div className="profile-avatar">
+              {user.name.charAt(0).toUpperCase()}
+            </div>
+          </button>
+
+          {showProfileMenu && (
+            <div className="profile-dropdown fade-in">
+              <div className="profile-dropdown-header">
+                <div className="profile-dropdown-avatar">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="profile-dropdown-info">
+                  <div className="profile-dropdown-name">{user.name}</div>
+                  <div className="profile-dropdown-email">{user.email}</div>
+                </div>
+              </div>
+              <div className="profile-dropdown-divider" />
+              <button className="profile-dropdown-item" onClick={() => setShowProfileMenu(false)}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                Account Info
+              </button>
+              <button className="profile-dropdown-item" onClick={() => setShowProfileMenu(false)}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+                Settings
+              </button>
+              <div className="profile-dropdown-divider" />
+              <button className="profile-dropdown-item profile-dropdown-logout" onClick={handleLogout}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                Logout
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
       <main className="main-content">
-        {/* ═════════════════════════════════════════════════════════════════
-            HOME PAGE
-            ═════════════════════════════════════════════════════════════════ */}
+        {/* Home page */}
         {currentPage === 'home' && (
           <HomePage onNavigate={setCurrentPage} />
         )}
 
-        {/* ═════════════════════════════════════════════════════════════════
-            ANALYZE PAGE
-            ═════════════════════════════════════════════════════════════════ */}
+        {/* Analyze page */}
         {currentPage === 'analyze' && (
           <div className="fade-in">
-            {/* Top bar */}
             <div className="top-bar">
               <div className="top-tabs">
                 <button
@@ -421,7 +493,6 @@ function App() {
               </div>
             </div>
 
-            {/* Breadcrumb + Title */}
             <div className="breadcrumb">
               <a href="#" onClick={(e) => { e.preventDefault(); setCurrentPage('home'); }}>Home</a>
               <span className="sep">›</span>
@@ -429,7 +500,7 @@ function App() {
             </div>
             <h1 className="page-title">Cross-Section Analyzer</h1>
 
-            {/* ── TAB: PDF ───────────────────────────────────────────────── */}
+            {/* PDF tab */}
             {activeTab === 'pdf' && (
               <div className="fade-in">
                 {!fileId && (
@@ -501,10 +572,10 @@ function App() {
                               onClick={() => setZoomedImage(pageImageUrl)}
                             >
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="15 3 21 3 21 9"/>
-                                <polyline points="9 21 3 21 3 15"/>
-                                <line x1="21" y1="3" x2="14" y2="10"/>
-                                <line x1="3" y1="21" x2="10" y2="14"/>
+                                <polyline points="15 3 21 3 21 9" />
+                                <polyline points="9 21 3 21 3 15" />
+                                <line x1="21" y1="3" x2="14" y2="10" />
+                                <line x1="3" y1="21" x2="10" y2="14" />
                               </svg>
                             </button>
                           </div>
@@ -557,7 +628,7 @@ function App() {
               </div>
             )}
 
-            {/* ── TAB: IMAGE ─────────────────────────────────────────────── */}
+            {/* Image tab */}
             {activeTab === 'image' && (
               <div className="fade-in">
                 {!imageFile && (
@@ -604,10 +675,10 @@ function App() {
                             onClick={() => setZoomedImage(imagePreview)}
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="15 3 21 3 21 9"/>
-                              <polyline points="9 21 3 21 3 15"/>
-                              <line x1="21" y1="3" x2="14" y2="10"/>
-                              <line x1="3" y1="21" x2="10" y2="14"/>
+                              <polyline points="15 3 21 3 21 9" />
+                              <polyline points="9 21 3 21 3 15" />
+                              <line x1="21" y1="3" x2="14" y2="10" />
+                              <line x1="3" y1="21" x2="10" y2="14" />
                             </svg>
                           </button>
                         </div>
@@ -662,13 +733,13 @@ function App() {
         )}
       </main>
 
-      {/* ── Lightbox ──────────────────────────────────────────────────────── */}
+      {/* Lightbox overlay */}
       {zoomedImage && (
         <div className="lightbox-overlay" onClick={closeLightbox}>
           <button className="lightbox-close" onClick={closeLightbox} title="Close (Esc)">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
           <img

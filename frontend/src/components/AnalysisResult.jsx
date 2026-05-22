@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-function safeWidth(lx, rx) {
+function calcWidth(lx, rx) {
   try {
     const w = Math.abs(parseFloat(rx) - parseFloat(lx));
     return isNaN(w) ? '—' : `${w.toFixed(1)} ft`;
@@ -9,9 +9,19 @@ function safeWidth(lx, rx) {
   }
 }
 
-function formatArea(val) {
+function fmtArea(val) {
   if (val == null) return '—';
   return `${val.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} sq ft`;
+}
+
+function formatSide(side) {
+  if (!side) return '—';
+  const mapping = {
+    'LEFT': 'Left',
+    'RIGHT': 'Right',
+    'CROSSES_CENTERLINE': 'Crosses Centerline'
+  };
+  return mapping[side.toUpperCase()] || side;
 }
 
 function SamplePointsTable({ samples }) {
@@ -61,6 +71,7 @@ function IntersectionCard({ region, index }) {
   const totalArea = areaCalc.total_area_sqft;
   const samples = areaCalc.sample_points || [];
   const notes = region.notes;
+  const side = region.side;
 
   let cardClass, icon, desc;
   if (rtype === 'CUT') {
@@ -79,7 +90,14 @@ function IntersectionCard({ region, index }) {
 
   return (
     <div className={`intersection-card ${cardClass}`}>
-      <div className="intersection-id">Intersection {rid}</div>
+      <div className="intersection-id">
+        Intersection {rid}
+        {side && (
+          <span className={`side-badge ${side.toLowerCase()}`}>
+            {formatSide(side)}
+          </span>
+        )}
+      </div>
       <div className={`intersection-type ${cardClass}`}>
         {icon} {rtype}
       </div>
@@ -100,12 +118,18 @@ function IntersectionCard({ region, index }) {
         </div>
         <div className="info-item">
           <div className="k">Width</div>
-          <div className="v">{safeWidth(lcp.x, rcp.x)}</div>
+          <div className="v">{calcWidth(lcp.x, rcp.x)}</div>
         </div>
         <div className="info-item">
           <div className="k">Area (Gemini estimate)</div>
-          <div className="v large">{formatArea(totalArea)}</div>
+          <div className="v large">{fmtArea(totalArea)}</div>
         </div>
+        {side && (
+          <div className="info-item">
+            <div className="k">Side</div>
+            <div className="v">{formatSide(side)}</div>
+          </div>
+        )}
       </div>
 
       <SamplePointsTable samples={samples} />
@@ -123,11 +147,11 @@ function IntersectionCard({ region, index }) {
 function SummaryPanel({ intersections }) {
   const cutTotal = intersections
     .filter((r) => (r.type || '').toUpperCase() === 'CUT')
-    .reduce((s, r) => s + ((r.area_calculation || {}).total_area_sqft || 0), 0);
+    .reduce((sum, r) => sum + ((r.area_calculation || {}).total_area_sqft || 0), 0);
 
   const fillTotal = intersections
     .filter((r) => (r.type || '').toUpperCase() === 'FILL')
-    .reduce((s, r) => s + ((r.area_calculation || {}).total_area_sqft || 0), 0);
+    .reduce((sum, r) => sum + ((r.area_calculation || {}).total_area_sqft || 0), 0);
 
   const net = cutTotal - fillTotal;
   const netClass = net > 0 ? 'net-cut' : net < 0 ? 'net-fill' : 'net-zero';
@@ -138,16 +162,16 @@ function SummaryPanel({ intersections }) {
       <div className="summary-row">
         <div className="summary-item">
           <div className="label">Total CUT</div>
-          <div className="value cut">{formatArea(cutTotal)}</div>
+          <div className="value cut">{fmtArea(cutTotal)}</div>
         </div>
         <div className="summary-item">
           <div className="label">Total FILL</div>
-          <div className="value fill">{formatArea(fillTotal)}</div>
+          <div className="value fill">{fmtArea(fillTotal)}</div>
         </div>
         <div className="summary-item">
           <div className="label">Net (CUT − FILL)</div>
           <div className={`value ${netClass}`}>
-            {net >= 0 ? '+' : ''}{formatArea(Math.abs(net))}
+            {net >= 0 ? '+' : ''}{fmtArea(Math.abs(net))}
           </div>
         </div>
       </div>
@@ -156,8 +180,6 @@ function SummaryPanel({ intersections }) {
 }
 
 export default function AnalysisResult({ data }) {
-  const [showRaw, setShowRaw] = useState(false);
-
   if (!data) return null;
 
   const station = data.station || '—';
@@ -169,7 +191,6 @@ export default function AnalysisResult({ data }) {
 
   return (
     <div className="result-panel">
-      {/* Station header */}
       <div className="station-header">
         <div className="station-grid">
           <div className="station-item">
@@ -195,15 +216,12 @@ export default function AnalysisResult({ data }) {
         </div>
       </div>
 
-      {/* Intersection cards */}
       {intersections.map((region, i) => (
         <IntersectionCard key={region.id ?? i} region={region} index={i} />
       ))}
 
-      {/* Summary */}
       {intersections.length > 0 && <SummaryPanel intersections={intersections} />}
 
-      {/* Reasoning */}
       {data.reasoning && (
         <div className="section-block">
           <div className="section-hdr">Reasoning</div>
@@ -211,26 +229,12 @@ export default function AnalysisResult({ data }) {
         </div>
       )}
 
-      {/* Notes */}
       {data.notes && (
         <div className="section-block">
           <div className="section-hdr">Notes</div>
           <div className="section-content">{data.notes}</div>
         </div>
       )}
-
-      {/* Raw JSON */}
-      <div className="expandable" style={{ marginTop: '1rem' }}>
-        <button className="expand-btn" onClick={() => setShowRaw(!showRaw)}>
-          <span className={`expand-arrow ${showRaw ? 'open' : ''}`}>▶</span>
-          Raw JSON
-        </button>
-        {showRaw && (
-          <div className="expand-content">
-            <pre className="raw-json">{JSON.stringify(data, null, 2)}</pre>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

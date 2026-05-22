@@ -10,7 +10,7 @@ env/
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Node / Frontend (fallback if run from root)
+# Node / Frontend
 node_modules/
 dist/
 dist-ssr/
@@ -22,6 +22,8 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # Editor / IDEs
 .vscode/
@@ -32,6 +34,7 @@ yarn-error.log*
 *.njsproj
 *.sln
 *.swp
+*.sw?
 
 # OS
 .DS_Store
