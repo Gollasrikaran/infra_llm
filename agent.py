@@ -123,7 +123,14 @@ def _extract_image_text(img_bytes: bytes, filename: str) -> str:
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
             ]
         }])
-        return response.content
+        content = response.content
+        if isinstance(content, list):
+    # Extract text from the first text-type block
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    return block["text"]
+            return str(content)  # fallback
+        return content  # already a string
     except Exception as e:
         return f"Error processing image: {str(e)}"
 

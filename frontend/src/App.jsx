@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import FileUpload from './components/FileUpload';
 import MetricCard from './components/MetricCard';
@@ -159,6 +159,9 @@ function App() {
   const [currentPage, setCurrentPage] = useState('home');
   const [activeTab, setActiveTab] = useState('pdf');
 
+  // ── Lightbox ───────────────────────────────────────────────────────────────
+  const [zoomedImage, setZoomedImage] = useState(null); // url | null
+
   // ── PDF Analysis state ─────────────────────────────────────────────────────
   const [pdfFile, setPdfFile] = useState(null);
   const [fileId, setFileId] = useState(null);
@@ -176,6 +179,15 @@ function App() {
   const [imageResult, setImageResult] = useState(null);
   const [imageError, setImageError] = useState(null);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+
+  // ── Close lightbox on Escape ───────────────────────────────────────────────
+  const closeLightbox = useCallback(() => setZoomedImage(null), []);
+  useEffect(() => {
+    if (!zoomedImage) return;
+    const handler = (e) => { if (e.key === 'Escape') closeLightbox(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [zoomedImage, closeLightbox]);
 
   // ══════════════════════════════════════════════════════════════════════════
   // PDF UPLOAD
@@ -483,6 +495,18 @@ function App() {
                         {pageImageUrl && (
                           <div className="page-preview">
                             <img src={pageImageUrl} alt={`Page ${selectedPage}`} loading="lazy" />
+                            <button
+                              className="preview-maximize-btn"
+                              title="Maximize"
+                              onClick={() => setZoomedImage(pageImageUrl)}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="15 3 21 3 21 9"/>
+                                <polyline points="9 21 3 21 3 15"/>
+                                <line x1="21" y1="3" x2="14" y2="10"/>
+                                <line x1="3" y1="21" x2="10" y2="14"/>
+                              </svg>
+                            </button>
                           </div>
                         )}
 
@@ -574,6 +598,18 @@ function App() {
                       {imagePreview && (
                         <div className="image-preview">
                           <img src={imagePreview} alt={imageFile.name} />
+                          <button
+                            className="preview-maximize-btn"
+                            title="Maximize"
+                            onClick={() => setZoomedImage(imagePreview)}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="15 3 21 3 21 9"/>
+                              <polyline points="9 21 3 21 3 15"/>
+                              <line x1="21" y1="3" x2="14" y2="10"/>
+                              <line x1="3" y1="21" x2="10" y2="14"/>
+                            </svg>
+                          </button>
                         </div>
                       )}
 
@@ -625,6 +661,24 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* ── Lightbox ──────────────────────────────────────────────────────── */}
+      {zoomedImage && (
+        <div className="lightbox-overlay" onClick={closeLightbox}>
+          <button className="lightbox-close" onClick={closeLightbox} title="Close (Esc)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+          <img
+            className="lightbox-img"
+            src={zoomedImage}
+            alt="Maximized view"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
