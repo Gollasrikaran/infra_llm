@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 # need the parent dir on the path so we can pull in agent.py
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from agent import extract_image_data_from_bytes  # noqa: E402
+from agent import extract_image_data_from_bytes, extract_station_only_from_bytes  # noqa: E402
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
@@ -161,6 +161,39 @@ async def analyze_pdf_page(request: AnalyzePageRequest):
 
     try:
         raw_result = extract_image_data_from_bytes(img_bytes)
+    except Exception as e:
+        return AnalysisResponse(success=False, error=f"Gemini API error: {str(e)}")
+
+    parsed = try_parse_json(raw_result)
+    if parsed:
+        return AnalysisResponse(success=True, data=parsed, raw=raw_result)
+    else:
+        return AnalysisResponse(
+            success=False,
+            raw=raw_result,
+            error="Could not parse JSON from Gemini response",
+        )
+
+
+@app.post("/api/analyze/pdf-page-station-only", response_model=AnalysisResponse)
+async def analyze_pdf_page_station_only(request: AnalyzePageRequest):
+    """Render a PDF page then send it to Gemini to extract ONLY the station number."""
+    if request.file_id not in pdf_cache:
+        raise HTTPException(status_code=404, detail="PDF not found. Upload it first.")
+
+    pdf_bytes = pdf_cache[request.file_id]
+    total_pages = count_pages(pdf_bytes)
+
+    if request.page_num < 1 or request.page_num > total_pages:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Page {request.page_num} out of range (1-{total_pages})",
+        )
+
+    img_bytes = render_page_png(pdf_bytes, request.page_num - 1)
+
+    try:
+        raw_result = extract_station_only_from_bytes(img_bytes)
     except Exception as e:
         return AnalysisResponse(success=False, error=f"Gemini API error: {str(e)}")
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 function calcWidth(lx, rx) {
   try {
@@ -22,6 +22,21 @@ function formatSide(side) {
     'CROSSES_CENTERLINE': 'Crosses Centerline'
   };
   return mapping[side.toUpperCase()] || side;
+}
+
+function parseStation(stationStr) {
+  if (!stationStr) return null;
+  const clean = stationStr.replace(/sta\.?/gi, '').replace(/[^0-9+\.]/g, '').trim();
+  if (clean.includes('+')) {
+    const parts = clean.split('+');
+    const left = parseFloat(parts[0]);
+    const right = parseFloat(parts[1]);
+    if (isNaN(left) || isNaN(right)) return null;
+    return left * 100 + right;
+  } else {
+    const val = parseFloat(clean);
+    return isNaN(val) ? null : val;
+  }
 }
 
 function SamplePointsTable({ samples }) {
@@ -180,6 +195,16 @@ function SummaryPanel({ intersections }) {
 }
 
 export default function AnalysisResult({ data }) {
+  const [currSta, setCurrSta] = useState('');
+  const [prevSta, setPrevSta] = useState('');
+
+  useEffect(() => {
+    if (data) {
+      setCurrSta(data.station || '');
+      setPrevSta(data.previous_station || '');
+    }
+  }, [data]);
+
   if (!data) return null;
 
   const station = data.station || '—';
@@ -188,6 +213,25 @@ export default function AnalysisResult({ data }) {
   const egLine = data.existing_ground_line || '—';
   const nRegions = data.total_intersections || 0;
   const intersections = data.intersections || [];
+
+  const parsedCurr = parseStation(currSta);
+  const parsedPrev = parseStation(prevSta);
+  const hasPrev = data.hasOwnProperty('previous_station');
+
+  let distance = null;
+  if (parsedCurr !== null && parsedPrev !== null) {
+    distance = Math.abs(parsedCurr - parsedPrev);
+  }
+
+  const sumArea = intersections.reduce((s, r) => s + ((r.area_calculation || {}).total_area_sqft || 0), 0);
+  const avgArea = intersections.length > 0 ? (sumArea / intersections.length) : 0;
+
+  let volumeCuFt = null;
+  let volumeCuYd = null;
+  if (distance !== null) {
+    volumeCuFt = avgArea * distance;
+    volumeCuYd = volumeCuFt / 27;
+  }
 
   return (
     <div className="result-panel">
@@ -221,6 +265,67 @@ export default function AnalysisResult({ data }) {
       ))}
 
       {intersections.length > 0 && <SummaryPanel intersections={intersections} />}
+
+      {hasPrev && (
+        <div className="volume-card">
+          <div className="volume-card-title">📐 Volume Calculation (Average End Area)</div>
+          <div className="volume-grid">
+            <div className="volume-item">
+              <label className="volume-lbl">Previous Station</label>
+              <input
+                type="text"
+                className="volume-input"
+                value={prevSta}
+                onChange={(e) => setPrevSta(e.target.value)}
+                placeholder="e.g. 12+00"
+              />
+              <span className="parsed-val">
+                {parsedPrev !== null ? `${parsedPrev.toFixed(1)} ft` : 'Invalid station'}
+              </span>
+            </div>
+            <div className="volume-item">
+              <label className="volume-lbl">Current Station</label>
+              <input
+                type="text"
+                className="volume-input"
+                value={currSta}
+                onChange={(e) => setCurrSta(e.target.value)}
+                placeholder="e.g. 12+50"
+              />
+              <span className="parsed-val">
+                {parsedCurr !== null ? `${parsedCurr.toFixed(1)} ft` : 'Invalid station'}
+              </span>
+            </div>
+            <div className="volume-item">
+              <label className="volume-lbl">Calculated Distance</label>
+              <div className="volume-val-highlight">
+                {distance !== null ? `${distance.toFixed(1)} ft` : '—'}
+              </div>
+            </div>
+            <div className="volume-item">
+              <label className="volume-lbl">Average Area (Current Page)</label>
+              <div className="volume-val-highlight">
+                {fmtArea(avgArea)}
+                <span className="area-details">
+                  ({intersections.length} region{intersections.length !== 1 ? 's' : ''})
+                </span>
+              </div>
+            </div>
+          </div>
+          {volumeCuYd !== null && (
+            <div className="volume-summary-box">
+              <div className="vol-summary-item">
+                <span className="vol-summary-lbl">Volume (Cubic Feet)</span>
+                <span className="vol-summary-val">{volumeCuFt.toLocaleString(undefined, { maximumFractionDigits: 1 })} cu ft</span>
+              </div>
+              <div className="vol-summary-item primary">
+                <span className="vol-summary-lbl">Volume (Cubic Yards)</span>
+                <span className="vol-summary-val highlight">{volumeCuYd.toLocaleString(undefined, { maximumFractionDigits: 1 })} cu yd</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {data.reasoning && (
         <div className="section-block">

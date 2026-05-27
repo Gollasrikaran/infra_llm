@@ -262,8 +262,21 @@ def render_result(data: dict):
         area_calc  = region.get("area_calculation", {})
         total_area = area_calc.get("total_area_sqft")
         samples    = area_calc.get("sample_points", [])
+        side       = region.get("side", "")
         lx, lelv   = lcp.get("x", "—"), lcp.get("elevation", "—")
         rx, relv   = rcp.get("x", "—"), rcp.get("elevation", "—")
+
+        formatted_side = "—"
+        if side:
+            side_upper = side.upper()
+            if side_upper == "LEFT":
+                formatted_side = "Left"
+            elif side_upper == "RIGHT":
+                formatted_side = "Right"
+            elif side_upper == "CROSSES_CENTERLINE":
+                formatted_side = "Crosses Centerline"
+            else:
+                formatted_side = side
 
         if rtype == "CUT":
             card_cls, color_cls, icon = "result-cut",  "cut-color",  "🔴"
@@ -275,10 +288,18 @@ def render_result(data: dict):
             card_cls, color_cls, icon = "result-unk",  "",           "⚪"
             desc = "Undetermined"
 
+        side_badge_html = f'<span style="background:#2a3f5a;color:#7eb8f7;padding:1px 5px;border-radius:4px;margin-left:8px;font-size:0.6rem">{formatted_side}</span>' if side else ''
+        side_info_html = f"""
+                <div class="info-item">
+                    <div class="k">Side</div>
+                    <div class="v">{formatted_side}</div>
+                </div>
+        """ if side else ""
+
         st.markdown(f"""
         <div class="{card_cls}">
             <div style="font-size:.68rem;color:#667788;text-transform:uppercase;
-                        letter-spacing:.1em;margin-bottom:.3rem">Intersection {rid}</div>
+                        letter-spacing:.1em;margin-bottom:.3rem">Intersection {rid}{side_badge_html}</div>
             <div class="result-type {color_cls}">{icon} {rtype}</div>
             <div style="color:#8899aa;font-size:.85rem;margin-bottom:.8rem">{desc}</div>
             <div class="info-grid">
@@ -300,6 +321,7 @@ def render_result(data: dict):
                         {f"{total_area:,.1f} sq ft" if total_area is not None else "—"}
                     </div>
                 </div>
+                {side_info_html}
             </div>
         </div>
         """, unsafe_allow_html=True)

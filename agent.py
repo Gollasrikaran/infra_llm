@@ -111,6 +111,13 @@ OUTPUT — Respond ONLY with valid JSON, no markdown, no code fences, no extra t
 }"""
 
 
+STATION_ONLY_PROMPT = """You are an expert highway engineer. Scan the drawing to find and extract ONLY the station number (e.g. 12+50, 13+00, 105+25).
+Respond with ONLY a JSON object, no markdown code fences:
+{
+  "station": "station number if visible, else null"
+}"""
+
+
 def _extract_image_text(img_bytes: bytes, filename: str) -> str:
     """Send image to Gemini and return raw JSON string."""
     llm = ChatGoogleGenerativeAI(
@@ -160,3 +167,32 @@ def extract_image_data(image_path: str) -> str:
 def extract_image_data_from_bytes(img_bytes: bytes) -> str:
     """For Streamlit usage when image is already in memory."""
     return _extract_image_text(img_bytes, filename="image.png")
+
+
+def extract_station_only_from_bytes(img_bytes: bytes) -> str:
+    """Send image to Gemini and return ONLY the station number in JSON."""
+    llm = ChatGoogleGenerativeAI(
+        model=PRIMARY_MODEL,
+        temperature=0.1,          # Lower temp = more precise/deterministic for engineering data
+        google_api_key=GOOGLE_API_KEY
+    )
+
+    image_base64 = base64.b64encode(img_bytes).decode("utf-8")
+
+    try:
+        response = llm.invoke([{
+            "role": "user",
+            "content": [
+                {"type": "text",      "text": STATION_ONLY_PROMPT},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
+            ]
+        }])
+        content = response.content
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    return block["text"]
+            return str(content)  # fallback
+        return content  # already a string
+    except Exception as e:
+        return f'{{"station": null, "error": "{str(e)}"}}'

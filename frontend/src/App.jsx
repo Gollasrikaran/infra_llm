@@ -280,23 +280,53 @@ function App() {
     setPdfError(null);
 
     try {
-      const res = await fetch(`${API_BASE}/analyze/pdf-page`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_id: fileId, page_num: selectedPage }),
-      });
+      const requests = [
+        fetch(`${API_BASE}/analyze/pdf-page`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_id: fileId, page_num: selectedPage }),
+        }).then(async (res) => {
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Analysis failed');
+          }
+          return res.json();
+        })
+      ];
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || 'Analysis failed');
+      // If page_num > 1, fetch the station number of the previous page
+      if (selectedPage > 1) {
+        requests.push(
+          fetch(`${API_BASE}/analyze/pdf-page-station-only`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_id: fileId, page_num: selectedPage - 1 }),
+          }).then(async (res) => {
+            if (!res.ok) {
+              const err = await res.json();
+              throw new Error(err.detail || 'Failed to extract previous station');
+            }
+            return res.json();
+          }).catch(err => {
+            console.error("Previous page station fetch error:", err);
+            return { success: false, error: err.message };
+          })
+        );
       }
 
-      const data = await res.json();
-      if (data.success && data.data) {
-        setPdfResult(data.data);
+      const [currentRes, prevRes] = await Promise.all(requests);
+
+      if (currentRes.success && currentRes.data) {
+        const combinedData = { ...currentRes.data };
+        if (prevRes && prevRes.success && prevRes.data && prevRes.data.station) {
+          combinedData.previous_station = prevRes.data.station;
+        } else {
+          combinedData.previous_station = null;
+        }
+        setPdfResult(combinedData);
       } else {
-        setPdfError(data.error || 'Could not parse Gemini response');
-        if (data.raw) setPdfResult({ _raw: data.raw });
+        setPdfError(currentRes.error || 'Could not parse Gemini response');
+        if (currentRes.raw) setPdfResult({ _raw: currentRes.raw });
       }
     } catch (err) {
       setPdfError(err.message);
