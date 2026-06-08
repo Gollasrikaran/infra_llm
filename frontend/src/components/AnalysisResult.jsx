@@ -76,15 +76,15 @@ function computeAreas(intersections) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function SamplePointsTable({ samples }) {
+function VerticesTable({ vertices }) {
   const [open, setOpen] = useState(false);
-  if (!samples || samples.length === 0) return null;
+  if (!vertices || vertices.length === 0) return null;
 
   return (
     <div className="expandable">
       <button className="expand-btn" onClick={() => setOpen(!open)}>
         <span className={`expand-arrow ${open ? 'open' : ''}`}>▶</span>
-        📊 Trapezoidal Sample Points ({samples.length})
+        📐 Polygon Vertices ({vertices.length} points)
       </button>
       {open && (
         <div className="expand-content">
@@ -92,18 +92,14 @@ function SamplePointsTable({ samples }) {
             <thead>
               <tr>
                 <th>Offset (ft)</th>
-                <th>Existing Elev (ft)</th>
-                <th>Proposed Elev (ft)</th>
-                <th>Gap (ft)</th>
+                <th>Elevation (ft)</th>
               </tr>
             </thead>
             <tbody>
-              {samples.map((s, i) => (
+              {vertices.map((v, i) => (
                 <tr key={i}>
-                  <td>{s.x ?? '—'}</td>
-                  <td>{s.existing_elev ?? '—'}</td>
-                  <td>{s.proposed_elev ?? '—'}</td>
-                  <td>{s.gap ?? '—'}</td>
+                  <td>{v.x ?? '—'}</td>
+                  <td>{v.elevation ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -121,7 +117,7 @@ function IntersectionCard({ region, index }) {
   const rcp = region.right_catch_point || {};
   const areaCalc = region.area_calculation || {};
   const totalArea = areaCalc.total_area_sqft;
-  const samples = areaCalc.sample_points || [];
+  const vertices  = areaCalc.vertices || [];
   const notes = region.notes;
 
   let cardClass, icon, desc;
@@ -165,12 +161,12 @@ function IntersectionCard({ region, index }) {
           <div className="v">{safeWidth(lcp.x, rcp.x)}</div>
         </div>
         <div className="info-item">
-          <div className="k">Area (Gemini estimate)</div>
+          <div className="k">Area (Shoelace Formula)</div>
           <div className="v large">{formatArea(totalArea)}</div>
         </div>
       </div>
 
-      <SamplePointsTable samples={samples} />
+      <VerticesTable vertices={vertices} />
 
       {notes && (
         <div className="info-item" style={{ marginTop: '0.5rem' }}>
@@ -196,7 +192,7 @@ function SummaryPanel({ intersections }) {
 
   return (
     <div className="summary-panel">
-      <div className="summary-title">Gemini Summary</div>
+      <div className="summary-title">Analysis Summary</div>
       <div className="summary-row">
         <div className="summary-item">
           <div className="label">Total CUT</div>

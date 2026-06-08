@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 # need the parent dir on the path so we can pull in agent.py
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from agent import extract_image_data_from_bytes, extract_station_only_from_bytes  # noqa: E402
+from shoelace_calculator import calculate_cross_section_area  # noqa: E402
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
@@ -41,6 +42,29 @@ pdf_cache: dict[str, bytes] = {}
 
 
 # --- helpers ---
+
+
+def enrich_with_shoelace(parsed: dict) -> dict:
+    """
+    Post-process Gemini JSON: for every intersection whose area_calculation
+    contains a 'vertices' list, compute total_area_sqft via the Shoelace
+    formula and write it back into the dict.
+
+    This keeps all arithmetic deterministic and removes the risk of the LLM
+    making calculation errors (e.g. misreading a coordinate then computing
+    a wildly wrong area with the trapezoidal approximation).
+    """
+    for region in parsed.get("intersections", []):
+        ac = region.get("area_calculation", {})
+        vertices = ac.get("vertices", [])
+        if vertices:
+            try:
+                coords = [(float(v["x"]), float(v["elevation"])) for v in vertices]
+                ac["total_area_sqft"] = calculate_cross_section_area(coords)
+            except (KeyError, TypeError, ValueError):
+                # Leave total_area_sqft as-is if vertices are malformed
+                pass
+    return parsed
 
 def count_pages(pdf_bytes: bytes) -> int:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -166,6 +190,7 @@ async def analyze_pdf_page(request: AnalyzePageRequest):
 
     parsed = try_parse_json(raw_result)
     if parsed:
+        parsed = enrich_with_shoelace(parsed)
         return AnalysisResponse(success=True, data=parsed, raw=raw_result)
     else:
         return AnalysisResponse(
@@ -226,6 +251,7 @@ async def analyze_image(file: UploadFile = File(...)):
 
     parsed = try_parse_json(raw_result)
     if parsed:
+        parsed = enrich_with_shoelace(parsed)
         return AnalysisResponse(success=True, data=parsed, raw=raw_result)
     else:
         return AnalysisResponse(

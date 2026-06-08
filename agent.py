@@ -61,18 +61,22 @@ Also note which side of the centerline (x=0) the region falls on:
   - One negative, one positive → side = "CROSSES_CENTERLINE"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 4 — CALCULATE AREA FOR EACH REGION (Trapezoidal Method)
+STEP 4 — EXTRACT POLYGON VERTICES FOR EACH REGION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-For EACH region independently between its two consecutive catch points:
-  - Sample the vertical gap |existing_elev - proposed_elev| every 5 or 10 feet
-  - gap = 0.0 at BOTH catch point boundaries (lines meet there)
-  - Area ≈ Σ [ (gap_i + gap_{i+1}) / 2 × Δx ]   result in sq ft
+For EACH enclosed region, list the ordered (x, elevation) coordinates
+that trace its perimeter. Go CLOCKWISE:
+  1. Start at the LEFT catch point.
+  2. Follow the PROPOSED GRADE line rightward to the RIGHT catch point,
+     recording every labelled or visually readable vertex along the way.
+  3. Follow the EXISTING GROUND line leftward back to the LEFT catch point,
+     recording every readable vertex along that path.
+  4. The polygon is now closed — do NOT repeat the start point.
 
   ⚠️ STRICT RULES:
-  - Only include x-offsets that fall STRICTLY between that region's own two catch points.
-  - Sample points outside a region's catch points must NOT be included.
-  - There is no cross-section area beyond the solid line's visual extent.
-  - Read as many sample points as the drawing allows for maximum accuracy.
+  - Include as many intermediate vertices as the drawing allows — more points = more accurate area.
+  - Only include x-offsets that fall STRICTLY within that region's own two catch points.
+  - Do NOT calculate the area yourself — leave total_area_sqft as null.
+    The area will be computed by a precise Python math function on the server.
 
 Also extract globally:
   - Station number (e.g. 13+00, 20+50)
@@ -97,16 +101,16 @@ OUTPUT — Respond ONLY with valid JSON, no markdown, no code fences, no extra t
       "left_catch_point":  {"x": <ft>, "elevation": <ft>},
       "right_catch_point": {"x": <ft>, "elevation": <ft>},
       "area_calculation": {
-        "method": "trapezoidal",
-        "sample_points": [
-          {"x": <ft>, "existing_elev": <ft>, "proposed_elev": <ft>, "gap": <ft>}
+        "method": "shoelace",
+        "vertices": [
+          {"x": <ft>, "elevation": <ft>}
         ],
-        "total_area_sqft": <number>
+        "total_area_sqft": null
       },
       "notes": "brief observation for this specific region"
     }
   ],
-  "reasoning": "walk through every catch point found left to right, explain why each region is CUT or FILL, and how the area was computed for each",
+  "reasoning": "walk through every catch point found left to right, explain why each region is CUT or FILL, and list the polygon vertices you extracted for each region",
   "notes": "any other overall observations"
 }"""
 

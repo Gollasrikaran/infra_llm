@@ -67,7 +67,7 @@ function HomePage({ onNavigate }) {
           <div className="home-stat-icon" style={{ background: '#fff3e0' }}>📐</div>
           <div>
             <div className="home-stat-label">Area Method</div>
-            <div className="home-stat-value">Trapezoidal Rule</div>
+            <div className="home-stat-value">Shoelace Formula</div>
           </div>
         </div>
         <div className="home-stat-card">
