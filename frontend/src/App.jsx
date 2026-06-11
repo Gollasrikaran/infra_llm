@@ -192,6 +192,7 @@ function App() {
   const [pdfFile, setPdfFile] = useState(null);
   const [fileId, setFileId] = useState(null);
   const [totalPages, setTotalPages] = useState(0);
+  const [pagesList, setPagesList] = useState([]);
   const [selectedPage, setSelectedPage] = useState(1);
   const [pageImageUrl, setPageImageUrl] = useState(null);
   const [pdfResult, setPdfResult] = useState(null);
@@ -250,6 +251,7 @@ function App() {
       const data = await res.json();
       setFileId(data.file_id);
       setTotalPages(data.total_pages);
+      setPagesList(data.pages || []);
       setSelectedPage(1);
     } catch (err) {
       setPdfError(err.message);
@@ -591,6 +593,7 @@ function App() {
                           totalPages={totalPages}
                           selectedPage={selectedPage}
                           onPageChange={setSelectedPage}
+                          pagesList={pagesList}
                         />
 
                         {pageImageUrl && (

@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from station_extractor import extract_station_from_image
 
 # need the parent dir on the path so we can pull in agent.py
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -103,6 +104,7 @@ class UploadResponse(BaseModel):
     file_id: str
     total_pages: int
     filename: str
+    pages: list[dict] = []
 
 
 class AnalyzePageRequest(BaseModel):
@@ -126,7 +128,6 @@ async def health_check():
 
 @app.post("/api/upload-pdf", response_model=UploadResponse)
 async def upload_pdf(file: UploadFile = File(...)):
-    """Upload a PDF, store it in memory, return a file_id + page count."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
 
@@ -140,11 +141,23 @@ async def upload_pdf(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
     pdf_cache[file_id] = pdf_bytes
 
+    # Run OpenCV/Tesseract extraction on each page
+    pages_info = []
+    for i in range(total_pages):
+        try:
+            img_bytes = render_page_png(pdf_bytes, i)
+            station = extract_station_from_image(img_bytes)
+        except Exception:
+            station = "Unknown"
+        pages_info.append({"page_num": i + 1, "station": station})
+
     return UploadResponse(
         file_id=file_id,
         total_pages=total_pages,
         filename=file.filename,
+        pages=pages_info,
     )
+
 
 
 @app.get("/api/pdf/{file_id}/page/{page_num}")

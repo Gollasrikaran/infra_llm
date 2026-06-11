@@ -44,6 +44,12 @@ Record EVERY catch point in order from left to right with its (x, elevation).
     is where the solid line ENDS (meets the dashed line), NOT the drawing edge.
   - DO NOT extend the proposed grade line beyond where it visually ends in the drawing.
 
+  ⚠️ VISUAL BOUNDARY WARNING (For both Colored and Black-and-White drawings):
+  - A region terminates immediately wherever the solid proposed line meets or crosses the dashed ground line.
+  - If the drawing has color shading, any transition between GREEN (Fill) and RED (Cut) is a catch point.
+  - If the drawing has NO color (empty space), a catch point occurs every single time the solid line and dashed line physically intersect or kiss. Do NOT bypass an intersection point to group separate areas together.
+
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 3 — IDENTIFY EACH ENCLOSED REGION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -83,6 +89,18 @@ Also extract globally:
   - Key elevations (centerline existing, centerline proposed, each catch point elevation)
   - All slope ratios visible on the solid proposed grade line (e.g. 2:1, 4:1, 8.0%)
   - The full x-extent of the solid proposed grade line
+
+    - NEVER cross through, over, or under the flat finished roadway surface template to connect a left-side area directly to a right-side area inside a single polygon. 
+  - The flat road surface serves as a strict structural divider. 
+  - Every time an enclosed shape or shaded region closes up, the polygon MUST terminate immediately at that specific coordinate. 
+  - For example, if a left slope hits the road shoulder near x = -20 ft, close the loop there. It must NOT inherit any coordinates past that structural boundary.
+
+    ⚠️ CRITICAL: DISTINGUISH GRID LINES FROM GROUND LINES
+  - The background contains solid or faint horizontal and vertical grid lines (like the 710 elevation line). NEVER use these straight grid lines as a boundary for a polygon.
+  - The existing ground line is exclusively the WAVY, UNDULATING dashed/dotted line. It is almost never a perfectly flat, straight horizontal line.
+  - If you trace a path and find that the elevation remains exactly the same number (e.g., 710) across multiple horizontal steps, STOP. You are accidentally tracking a background grid line instead of the true ground profile.
+
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT — Respond ONLY with valid JSON, no markdown, no code fences, no extra text:
@@ -124,9 +142,11 @@ Respond with ONLY a JSON object, no markdown code fences:
 
 def _extract_image_text(img_bytes: bytes, filename: str) -> str:
     """Send image to Gemini and return raw JSON string."""
+    # Pass the AQ token string straight to the google_api_key field.
+    # The SDK core handles bearer string conversion natively without Pydantic proxy crashes.
     llm = ChatGoogleGenerativeAI(
         model=PRIMARY_MODEL,
-        temperature=0.2,          # Lower temp = more precise/deterministic for engineering data
+        temperature=0.2,          
         google_api_key=GOOGLE_API_KEY
     )
 
@@ -142,12 +162,11 @@ def _extract_image_text(img_bytes: bytes, filename: str) -> str:
         }])
         content = response.content
         if isinstance(content, list):
-    # Extract text from the first text-type block
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "text":
                     return block["text"]
-            return str(content)  # fallback
-        return content  # already a string
+            return str(content)  
+        return content  
     except Exception as e:
         return f"Error processing image: {str(e)}"
 
@@ -160,10 +179,8 @@ def extract_image_data(image_path: str) -> str:
     try:
         with open(image_path, "rb") as image_file:
             img_bytes = image_file.read()
-
         filename = os.path.basename(image_path)
         return _extract_image_text(img_bytes, filename)
-
     except Exception as e:
         raise Exception(f"Failed to extract data from image: {str(e)}")
 
@@ -177,7 +194,7 @@ def extract_station_only_from_bytes(img_bytes: bytes) -> str:
     """Send image to Gemini and return ONLY the station number in JSON."""
     llm = ChatGoogleGenerativeAI(
         model=PRIMARY_MODEL,
-        temperature=0.1,          # Lower temp = more precise/deterministic for engineering data
+        temperature=0.1,          
         google_api_key=GOOGLE_API_KEY
     )
 
@@ -196,7 +213,7 @@ def extract_station_only_from_bytes(img_bytes: bytes) -> str:
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "text":
                     return block["text"]
-            return str(content)  # fallback
-        return content  # already a string
+            return str(content)
+        return content
     except Exception as e:
-        return f'{{"station": null, "error": "{str(e)}"}}'
+        return f"Error processing image: {str(e)}"
