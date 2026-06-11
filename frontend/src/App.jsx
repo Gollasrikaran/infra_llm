@@ -207,6 +207,15 @@ function App() {
   const [imageError, setImageError] = useState(null);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
 
+  // Crop state
+  const [isCropMode, setIsCropMode] = useState(false);
+  const [cropStart, setCropStart] = useState(null);
+  const [cropEnd, setCropEnd] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [croppedBlob, setCroppedBlob] = useState(null);
+  const [croppedPreview, setCroppedPreview] = useState(null);
+  const lightboxImgRef = useRef(null);
+
   // close lightbox on Escape key
   const closeLightbox = useCallback(() => setZoomedImage(null), []);
   useEffect(() => {
@@ -215,6 +224,87 @@ function App() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [zoomedImage, closeLightbox]);
+
+  // --- Crop helpers ---
+  const getMousePosOnImage = (e) => {
+    const img = lightboxImgRef.current;
+    if (!img) return null;
+    const rect = img.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(e.clientX - rect.left, rect.width)),
+      y: Math.max(0, Math.min(e.clientY - rect.top, rect.height)),
+    };
+  };
+
+  const handleCropMouseDown = (e) => {
+    if (!isCropMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pos = getMousePosOnImage(e);
+    if (pos) {
+      setCropStart(pos);
+      setCropEnd(pos);
+      setIsDragging(true);
+    }
+  };
+
+  const handleCropMouseMove = (e) => {
+    if (!isDragging || !isCropMode) return;
+    e.preventDefault();
+    const pos = getMousePosOnImage(e);
+    if (pos) setCropEnd(pos);
+  };
+
+  const handleCropMouseUp = (e) => {
+    if (!isDragging) return;
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const applyCrop = () => {
+    const img = lightboxImgRef.current;
+    if (!img || !cropStart || !cropEnd) return;
+
+    const rect = img.getBoundingClientRect();
+    const scaleX = img.naturalWidth / rect.width;
+    const scaleY = img.naturalHeight / rect.height;
+
+    const sx = Math.min(cropStart.x, cropEnd.x) * scaleX;
+    const sy = Math.min(cropStart.y, cropEnd.y) * scaleY;
+    const sw = Math.abs(cropEnd.x - cropStart.x) * scaleX;
+    const sh = Math.abs(cropEnd.y - cropStart.y) * scaleY;
+
+    if (sw < 10 || sh < 10) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    canvas.toBlob((blob) => {
+      if (blob) {
+        setCroppedBlob(blob);
+        setCroppedPreview(canvas.toDataURL('image/png'));
+        setIsCropMode(false);
+        setCropStart(null);
+        setCropEnd(null);
+        closeLightbox();
+      }
+    }, 'image/png');
+  };
+
+  const cancelCrop = () => {
+    setIsCropMode(false);
+    setCropStart(null);
+    setCropEnd(null);
+    setIsDragging(false);
+  };
+
+  const clearCrop = () => {
+    setCroppedBlob(null);
+    setCroppedPreview(null);
+  };
 
   // --- PDF upload handler ---
 
@@ -225,6 +315,8 @@ function App() {
     setFileId(null);
     setTotalPages(0);
     setSelectedPage(1);
+    setCroppedBlob(null);
+    setCroppedPreview(null);
 
     if (!file) {
       setPdfFile(null);
@@ -270,6 +362,8 @@ function App() {
     setPageImageUrl(`${API_BASE}/pdf/${fileId}/page/${selectedPage}`);
     setPdfResult(null);
     setPdfError(null);
+    setCroppedBlob(null);
+    setCroppedPreview(null);
   }, [fileId, selectedPage]);
 
   // --- PDF analysis handler ---
@@ -282,19 +376,39 @@ function App() {
     setPdfError(null);
 
     try {
-      const requests = [
-        fetch(`${API_BASE}/analyze/pdf-page`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_id: fileId, page_num: selectedPage }),
-        }).then(async (res) => {
-          if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.detail || 'Analysis failed');
-          }
-          return res.json();
-        })
-      ];
+      const requests = [];
+
+      // If we have a cropped image, send it as an image analysis instead
+      if (croppedBlob) {
+        const formData = new FormData();
+        formData.append('file', croppedBlob, 'cropped_page.png');
+        requests.push(
+          fetch(`${API_BASE}/analyze/image`, {
+            method: 'POST',
+            body: formData,
+          }).then(async (res) => {
+            if (!res.ok) {
+              const err = await res.json();
+              throw new Error(err.detail || 'Analysis failed');
+            }
+            return res.json();
+          })
+        );
+      } else {
+        requests.push(
+          fetch(`${API_BASE}/analyze/pdf-page`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_id: fileId, page_num: selectedPage }),
+          }).then(async (res) => {
+            if (!res.ok) {
+              const err = await res.json();
+              throw new Error(err.detail || 'Analysis failed');
+            }
+            return res.json();
+          })
+        );
+      }
 
       // If page_num > 1, fetch the station number of the previous page
       if (selectedPage > 1) {
@@ -343,6 +457,8 @@ function App() {
     setImageResult(null);
     setImageError(null);
     setImagePreview(null);
+    setCroppedBlob(null);
+    setCroppedPreview(null);
 
     if (!file) {
       setImageFile(null);
@@ -362,7 +478,12 @@ function App() {
 
     try {
       const formData = new FormData();
-      formData.append('file', imageFile);
+      // If we have a cropped blob, send that instead of the full image
+      if (croppedBlob) {
+        formData.append('file', croppedBlob, 'cropped_image.png');
+      } else {
+        formData.append('file', imageFile);
+      }
 
       const res = await fetch(`${API_BASE}/analyze/image`, {
         method: 'POST',
@@ -614,6 +735,19 @@ function App() {
                           </div>
                         )}
 
+                        {croppedPreview && activeTab === 'pdf' && (
+                          <div className="crop-indicator">
+                            <div className="crop-indicator-header">
+                              <span>✂️ Cropped Region</span>
+                              <button className="crop-clear-btn" onClick={clearCrop} title="Remove crop">✕</button>
+                            </div>
+                            <div className="crop-indicator-preview">
+                              <img src={croppedPreview} alt="Cropped region" />
+                            </div>
+                            <div className="crop-indicator-info">Only this cropped region will be analyzed</div>
+                          </div>
+                        )}
+
                         <button
                           className="btn-analyze"
                           onClick={handleAnalyzePdf}
@@ -717,6 +851,19 @@ function App() {
                         </div>
                       )}
 
+                      {croppedPreview && activeTab === 'image' && (
+                        <div className="crop-indicator">
+                          <div className="crop-indicator-header">
+                            <span>✂️ Cropped Region</span>
+                            <button className="crop-clear-btn" onClick={clearCrop} title="Remove crop">✕</button>
+                          </div>
+                          <div className="crop-indicator-preview">
+                            <img src={croppedPreview} alt="Cropped region" />
+                          </div>
+                          <div className="crop-indicator-info">Only this cropped region will be analyzed</div>
+                        </div>
+                      )}
+
                       <button
                         className="btn-analyze"
                         onClick={handleAnalyzeImage}
@@ -766,21 +913,110 @@ function App() {
         )}
       </main>
 
-      {/* Lightbox overlay */}
+      {/* Lightbox overlay with crop support */}
       {zoomedImage && (
-        <div className="lightbox-overlay" onClick={closeLightbox}>
-          <button className="lightbox-close" onClick={closeLightbox} title="Close (Esc)">
+        <div
+          className={`lightbox-overlay ${isCropMode ? 'crop-active' : ''}`}
+          onClick={isCropMode ? undefined : closeLightbox}
+          onMouseMove={isCropMode ? handleCropMouseMove : undefined}
+          onMouseUp={isCropMode ? handleCropMouseUp : undefined}
+        >
+          {/* Close button */}
+          <button className="lightbox-close" onClick={() => { cancelCrop(); closeLightbox(); }} title="Close (Esc)">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
-          <img
-            className="lightbox-img"
-            src={zoomedImage}
-            alt="Maximized view"
+
+          {/* Crop toolbar */}
+          <div className="lightbox-toolbar" onClick={(e) => e.stopPropagation()}>
+            {!isCropMode ? (
+              <button className="lightbox-tool-btn" onClick={() => setIsCropMode(true)} title="Crop Image">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6.13 1L6 16a2 2 0 0 0 2 2h15" />
+                  <path d="M1 6.13L16 6a2 2 0 0 1 2 2v15" />
+                </svg>
+                <span>Crop</span>
+              </button>
+            ) : (
+              <>
+                <button
+                  className="lightbox-tool-btn confirm"
+                  onClick={applyCrop}
+                  disabled={!cropStart || !cropEnd || Math.abs((cropEnd?.x || 0) - (cropStart?.x || 0)) < 10}
+                  title="Apply Crop"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  <span>Use Cropped</span>
+                </button>
+                <button className="lightbox-tool-btn cancel" onClick={cancelCrop} title="Cancel Crop">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                  <span>Cancel</span>
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Crop mode instructions */}
+          {isCropMode && !cropStart && (
+            <div className="crop-instructions" onClick={(e) => e.stopPropagation()}>
+              Click and drag on the image to select a crop region
+            </div>
+          )}
+
+          {/* Image container with crop overlay */}
+          <div
+            className="lightbox-img-container"
             onClick={(e) => e.stopPropagation()}
-          />
+            onMouseDown={isCropMode ? handleCropMouseDown : undefined}
+            style={{ cursor: isCropMode ? 'crosshair' : 'default' }}
+          >
+            <img
+              ref={lightboxImgRef}
+              className="lightbox-img"
+              src={zoomedImage}
+              alt="Maximized view"
+              draggable={false}
+              style={{ userSelect: 'none' }}
+            />
+            {/* Crop selection rectangle */}
+            {isCropMode && cropStart && cropEnd && (
+              <>
+                {/* Dark overlay outside crop */}
+                <div className="crop-overlay-mask" style={{
+                  clipPath: `polygon(
+                    0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%,
+                    ${Math.min(cropStart.x, cropEnd.x)}px ${Math.min(cropStart.y, cropEnd.y)}px,
+                    ${Math.min(cropStart.x, cropEnd.x)}px ${Math.max(cropStart.y, cropEnd.y)}px,
+                    ${Math.max(cropStart.x, cropEnd.x)}px ${Math.max(cropStart.y, cropEnd.y)}px,
+                    ${Math.max(cropStart.x, cropEnd.x)}px ${Math.min(cropStart.y, cropEnd.y)}px,
+                    ${Math.min(cropStart.x, cropEnd.x)}px ${Math.min(cropStart.y, cropEnd.y)}px
+                  )`
+                }} />
+                {/* Crop border */}
+                <div className="crop-selection" style={{
+                  left: Math.min(cropStart.x, cropEnd.x),
+                  top: Math.min(cropStart.y, cropEnd.y),
+                  width: Math.abs(cropEnd.x - cropStart.x),
+                  height: Math.abs(cropEnd.y - cropStart.y),
+                }}>
+                  <div className="crop-handle crop-handle-tl" />
+                  <div className="crop-handle crop-handle-tr" />
+                  <div className="crop-handle crop-handle-bl" />
+                  <div className="crop-handle crop-handle-br" />
+                  <div className="crop-size">
+                    {Math.round(Math.abs(cropEnd.x - cropStart.x))} × {Math.round(Math.abs(cropEnd.y - cropStart.y))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
