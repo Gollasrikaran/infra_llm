@@ -11,6 +11,15 @@ PRIMARY_MODEL  = os.getenv("GEMINI_MODEL")
 
 PROMPT = """You are an expert highway engineer analyzing a cross-section drawing.
 
+NOTE: This image has been pre-processed with computer vision. Cross-section regions
+are color-coded:
+  - RED shaded area = CUT region (existing ground above proposed grade — excavation)
+  - GREEN shaded area = FILL region (proposed grade above existing ground — embankment)
+  - BLUE highlighted line = solid proposed grade line
+
+Use these colors to quickly identify CUT vs FILL regions. Still extract all
+coordinates, vertices, and data as instructed below.
+
 GRID SCALE (read from the axis labels on the drawing):
 - X-axis (horizontal): Each labeled interval = 10 feet (offset from centerline)
 - Y-axis (vertical): Each labeled interval = 10 feet (elevation)

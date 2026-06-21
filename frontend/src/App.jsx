@@ -359,7 +359,7 @@ function App() {
       setPageImageUrl(null);
       return;
     }
-    setPageImageUrl(`${API_BASE}/pdf/${fileId}/page/${selectedPage}`);
+    setPageImageUrl(`${API_BASE}/pdf/${fileId}/page/${selectedPage}/colored`);
     setPdfResult(null);
     setPdfError(null);
     setCroppedBlob(null);
