@@ -203,6 +203,8 @@ function App() {
   // image analysis state
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [coloredImagePreview, setColoredImagePreview] = useState(null);
+  const [isColorizing, setIsColorizing] = useState(false);
   const [imageResult, setImageResult] = useState(null);
   const [imageError, setImageError] = useState(null);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
@@ -453,10 +455,11 @@ function App() {
 
   // --- Image upload + analysis ---
 
-  const handleImageSelected = (file) => {
+  const handleImageSelected = async (file) => {
     setImageResult(null);
     setImageError(null);
     setImagePreview(null);
+    setColoredImagePreview(null);
     setCroppedBlob(null);
     setCroppedPreview(null);
 
@@ -467,6 +470,25 @@ function App() {
 
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
+
+    // Colorize the image via OpenCV backend
+    setIsColorizing(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_BASE}/colorize-image`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        setColoredImagePreview(URL.createObjectURL(blob));
+      }
+    } catch (err) {
+      console.error('Image colorization failed:', err);
+    } finally {
+      setIsColorizing(false);
+    }
   };
 
   const handleAnalyzeImage = async () => {
@@ -833,13 +855,20 @@ function App() {
                         >✕</button>
                       </div>
 
-                      {imagePreview && (
+                      {isColorizing && (
+                        <div className="loading-message" style={{ marginBottom: '0.5rem' }}>
+                          <span className="icon">🎨</span>
+                          Colorizing cross-sections…
+                        </div>
+                      )}
+
+                      {(coloredImagePreview || imagePreview) && (
                         <div className="image-preview">
-                          <img src={imagePreview} alt={imageFile.name} />
+                          <img src={coloredImagePreview || imagePreview} alt={imageFile.name} />
                           <button
                             className="preview-maximize-btn"
                             title="Maximize"
-                            onClick={() => setZoomedImage(imagePreview)}
+                            onClick={() => setZoomedImage(coloredImagePreview || imagePreview)}
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                               <polyline points="15 3 21 3 21 9" />

@@ -7,18 +7,11 @@ export default function PageSelector({ totalPages, selectedPage, onPageChange, p
         value={selectedPage}
         onChange={(e) => onPageChange(Number(e.target.value))}
       >
-        {Array.from({ length: totalPages }, (_, i) => i + 1).map((num) => {
-          const pageData = pagesList.find(p => p.page_num === num);
-          const stationLabel = pageData && pageData.station !== "Unknown" 
-            ? ` - STA ${pageData.station}` 
-            : '';
-            
-          return (
-            <option key={num} value={num}>
-              Page {num}{stationLabel}
-            </option>
-          );
-        })}
+        {Array.from({ length: totalPages }, (_, i) => i + 1).map((num) => (
+          <option key={num} value={num}>
+            Page {num}
+          </option>
+        ))}
       </select>
     </div>
   );

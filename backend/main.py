@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from station_extractor import extract_station_from_image
+# from station_extractor import extract_station_from_image  # commented out — using page numbers only
 
 # need the parent dir on the path so we can pull in agent.py
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -145,17 +145,18 @@ async def upload_pdf(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
     pdf_cache[file_id] = pdf_bytes
 
-    # Step 1: Run OpenCV/Tesseract station extraction on each page
+    # Step 1: Render each page and build page list (page numbers only)
     pages_info = []
     rendered_pages: dict[int, bytes] = {}  # cache raw renders for coloring step
     for i in range(total_pages):
         try:
             img_bytes = render_page_png(pdf_bytes, i)
             rendered_pages[i] = img_bytes
-            station = extract_station_from_image(img_bytes)
         except Exception:
-            station = "Unknown"
-        pages_info.append({"page_num": i + 1, "station": station})
+            pass
+        # Station extraction commented out — using page numbers only
+        # station = extract_station_from_image(img_bytes)
+        pages_info.append({"page_num": i + 1})
 
     # Step 2: Run OpenCV cross-section coloring on each page
     colored_cache[file_id] = {}
@@ -288,6 +289,25 @@ async def analyze_pdf_page_station_only(request: AnalyzePageRequest):
             raw=raw_result,
             error="Could not parse JSON from Gemini response",
         )
+
+
+@app.post("/api/colorize-image")
+async def colorize_image(file: UploadFile = File(...)):
+    """Accept an image, run OpenCV coloring, and return the colored PNG."""
+    allowed = (".png", ".jpg", ".jpeg")
+    if not file.filename.lower().endswith(allowed):
+        raise HTTPException(
+            status_code=400, detail="Only PNG, JPG, JPEG files are accepted"
+        )
+
+    img_bytes = await file.read()
+
+    try:
+        colored_bytes = colorize_cross_section(img_bytes)
+    except Exception:
+        colored_bytes = img_bytes  # fall back to raw if coloring fails
+
+    return Response(content=colored_bytes, media_type="image/png")
 
 
 @app.post("/api/analyze/image", response_model=AnalysisResponse)
