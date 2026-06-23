@@ -412,35 +412,23 @@ function App() {
         );
       }
 
-      // If page_num > 1, fetch the station number of the previous page
-      if (selectedPage > 1) {
-        requests.push(
-          fetch(`${API_BASE}/analyze/pdf-page-station-only`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ file_id: fileId, page_num: selectedPage - 1 }),
-          }).then(async (res) => {
-            if (!res.ok) {
-              const err = await res.json();
-              throw new Error(err.detail || 'Failed to extract previous station');
-            }
-            return res.json();
-          }).catch(err => {
-            console.error("Previous page station fetch error:", err);
-            return { success: false, error: err.message };
-          })
-        );
-      }
-
-      const [currentRes, prevRes] = await Promise.all(requests);
+      const [currentRes] = await Promise.all(requests);
 
       if (currentRes.success && currentRes.data) {
         const combinedData = { ...currentRes.data };
-        if (prevRes && prevRes.success && prevRes.data && prevRes.data.station) {
-          combinedData.previous_station = prevRes.data.station;
+        
+        // Retrieve previous page's station directly from local cache (pagesList)
+        if (selectedPage > 1 && pagesList[selectedPage - 2]) {
+          combinedData.previous_station = pagesList[selectedPage - 2].station;
         } else {
           combinedData.previous_station = null;
         }
+        
+        // Fallback for current station if Gemini output is missing or empty
+        if (!combinedData.station && pagesList[selectedPage - 1]) {
+          combinedData.station = pagesList[selectedPage - 1].station;
+        }
+
         setPdfResult(combinedData);
       } else {
         setPdfError(currentRes.error || 'Could not parse Gemini response');

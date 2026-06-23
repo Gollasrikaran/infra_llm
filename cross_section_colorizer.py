@@ -1,27 +1,135 @@
 """
 cross_section_colorizer.py
 ==========================
-OpenCV-based cross-section coloring module.
+OpenCV-based cross-section extraction and coloring module.
 
-Adapted from colleague's two-pass pipeline for in-memory processing.
-This module ONLY colors the cross-section regions on the image:
-  - RED   = CUT  (existing ground above proposed grade — excavation)
-  - GREEN = FILL (proposed grade above existing ground — embankment)
-  - BLUE  = solid proposed-grade line (highlighted)
+Two main capabilities:
+  1. PDF EXTRACTION — Extracts individual cross-section images from
+     23-series engineering PDF pages (multiple graphs per page).
+  2. COLORING — Colors the cross-section regions on each image:
+       - RED   = CUT  (existing ground above proposed grade — excavation)
+       - GREEN = FILL (proposed grade above existing ground — embankment)
+       - BLUE  = solid proposed-grade line (highlighted)
 
-The coloring is purely visual assistance for the LLM. No area calculation
-is performed here — the LLM + Shoelace pipeline handles that.
+The coloring is purely visual assistance for the LLM.
+The LLM + Shoelace pipeline still handles area calculation.
 
-Two-pass approach:
+Two-pass coloring approach:
   PASS 1 — Per-column gap profiling (detects bridge abutments)
   PASS 2 — Production coloring with bridge-aware fill
 """
 
 import cv2
 import numpy as np
+import os
+import re
+import shutil
+import tempfile
+
+import fitz  # PyMuPDF
 
 
-# ── Grid removal + solid/dotted mask separation ──────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF → INDIVIDUAL CROSS-SECTION EXTRACTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def extract_cross_sections_from_pdf(pdf_bytes: bytes) -> list[dict]:
+    """
+    Extract individual cross-section images from a 23-series engineering PDF.
+
+    Filters pages by drawing number (23-series) and "cross section" label,
+    then crops each station's cross-section at high resolution.
+
+    Args:
+        pdf_bytes : Raw PDF file bytes.
+
+    Returns:
+        list[dict] : Each dict contains:
+            - "img_bytes"  : PNG bytes of the extracted cross-section
+            - "station"    : Station string (e.g. "23+50") or filename fallback
+            - "page_num"   : Original PDF page number (1-indexed)
+            - "index"      : Cross-section index within the page (1-indexed)
+    """
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    extracted = []
+
+    for i in range(len(doc)):
+        page = doc[i]
+        rect = page.rect
+
+        # Filter for 23-series cross sections
+        br_rect = fitz.Rect(
+            rect.width * 0.65, rect.height * 0.75,
+            rect.width, rect.height
+        )
+        corner_text = page.get_text("text", clip=br_rect).strip()
+
+        is_23_series = False
+        for line in corner_text.split('\n'):
+            clean_line = re.sub(
+                r'(?i)DRAWING|NO\.?|DRG|[:\s]', '', line
+            ).strip()
+            if (
+                (clean_line.startswith("23-") or clean_line.startswith("23"))
+                and "+" not in clean_line
+            ):
+                is_23_series = True
+                break
+
+        if not (is_23_series
+                and re.search(r'(?i)cross[- \s]*section', corner_text)):
+            continue
+
+        # Find station labels on the right strip
+        right_strip = fitz.Rect(rect.width * 0.80, 0, rect.width, rect.height)
+        station_labels = page.search_for("+", clip=right_strip)
+        station_labels.sort(key=lambda x: x.y0)
+
+        last_bottom_cut = 35
+
+        for j, label in enumerate(station_labels):
+            y_top = last_bottom_cut
+            current_bottom_target = label.y1 + 48
+
+            if j + 1 < len(station_labels):
+                y_bottom = min(
+                    current_bottom_target,
+                    station_labels[j + 1].y0 - 20,
+                )
+            else:
+                y_bottom = min(current_bottom_target, rect.height * 0.88)
+
+            last_bottom_cut = y_bottom
+            crop_rect = fitz.Rect(0, y_top, rect.width, y_bottom)
+
+            # Build station name from text near the label
+            text_area = fitz.Rect(
+                rect.width * 0.80, label.y0 - 30,
+                rect.width, label.y1 + 30,
+            )
+            sta_val = page.get_text("text", clip=text_area).strip()
+            clean_name = re.sub(r'[^0-9+]', '', sta_val)
+            if not clean_name:
+                clean_name = f"sta_{j + 1}"
+
+            # High-res render (3× zoom)
+            pix = page.get_pixmap(matrix=fitz.Matrix(3, 3), clip=crop_rect)
+            img_bytes = pix.tobytes("png")
+
+            extracted.append({
+                "img_bytes": img_bytes,
+                "station": clean_name,
+                "page_num": i + 1,
+                "index": j + 1,
+            })
+
+    doc.close()
+    return extracted
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GRID REMOVAL + SOLID/DOTTED MASK SEPARATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_masks(img_gray):
     """
@@ -78,18 +186,25 @@ def _build_masks(img_gray):
     return solid_mask, dotted_mask, eraser, scale_line_y_threshold
 
 
-# ── PASS 1 — Per-column gap profiling ────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# PASS 1 — Per-column gap profiling
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def _analyze_page_gaps(img_gray):
+def _analyze_page_gaps(img_gray, masks=None):
     """
     PASS 1: Profile the vertical gap between the solid and dotted lines
     at each column. Large gaps indicate bridge abutments that should not
     be colored through.
 
-    Returns col_gap_profile (array of gap sizes per column).
+    Returns:
+        col_gap_profile : np.array of gap sizes per column
+        masks           : cached (solid_mask, dotted_mask, eraser,
+                          scale_line_y_threshold) for reuse in PASS 2
     """
     h_img, w_img = img_gray.shape
-    solid_mask, dotted_mask, _, _ = _build_masks(img_gray)
+    if masks is None:
+        masks = _build_masks(img_gray)
+    solid_mask, dotted_mask, _, _ = masks
 
     heal_kernel     = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
     solid_boundary  = cv2.morphologyEx(solid_mask,  cv2.MORPH_CLOSE, heal_kernel)
@@ -97,24 +212,33 @@ def _analyze_page_gaps(img_gray):
 
     col_gap_profile = np.zeros(w_img, dtype=np.float32)
 
-    for c in range(20, w_img - 20):
-        solid_rows  = np.where(solid_boundary[:, c]  == 255)[0]
-        dotted_rows = np.where(dotted_boundary[:, c] == 255)[0]
-        if len(solid_rows) == 0 or len(dotted_rows) == 0:
-            continue
+    # Vectorized: find columns where both solid and dotted exist
+    solid_any  = (solid_boundary[:, 20:w_img - 20] == 255)
+    dotted_any = (dotted_boundary[:, 20:w_img - 20] == 255)
 
-        top_solid_y     = np.min(solid_rows)
-        bottom_dotted_y = np.max(dotted_rows)
+    solid_col_has  = solid_any.any(axis=0)
+    dotted_col_has = dotted_any.any(axis=0)
+    both_have      = solid_col_has & dotted_col_has
 
-        if bottom_dotted_y > top_solid_y:
-            col_gap_profile[c] = float(abs(top_solid_y - bottom_dotted_y))
+    if np.any(both_have):
+        cols_with_both = np.where(both_have)[0]
+        for ci in cols_with_both:
+            c = ci + 20  # offset back to original column index
+            solid_rows  = np.where(solid_boundary[:, c] == 255)[0]
+            dotted_rows = np.where(dotted_boundary[:, c] == 255)[0]
+            top_solid_y     = solid_rows[0]
+            bottom_dotted_y = dotted_rows[-1]
+            if bottom_dotted_y > top_solid_y:
+                col_gap_profile[c] = float(abs(top_solid_y - bottom_dotted_y))
 
-    return col_gap_profile
+    return col_gap_profile, masks
 
 
-# ── PASS 2 — Production coloring with bridge-aware fill ──────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# PASS 2 — Production coloring with bridge-aware fill
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def _process_image(img_gray, col_gap_profile):
+def _process_image(img_gray, col_gap_profile, masks=None):
     """
     PASS 2: Color the cross-section regions on the image.
 
@@ -125,8 +249,11 @@ def _process_image(img_gray, col_gap_profile):
       - Black text preserved
     """
     h_img, w_img = img_gray.shape
-    solid_mask, dotted_mask, eraser, scale_line_y_threshold = _build_masks(img_gray)
+    if masks is None:
+        masks = _build_masks(img_gray)
+    solid_mask, dotted_mask, eraser, scale_line_y_threshold = masks
 
+    # Base output: grayscale → BGR, erased grid → white
     color_output = cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR)
     color_output[eraser > 0] = [255, 255, 255]
 
@@ -137,6 +264,7 @@ def _process_image(img_gray, col_gap_profile):
     red_overlay   = np.zeros_like(solid_mask)
     green_overlay = np.zeros_like(solid_mask)
 
+    # Bridge gate: only enter fill logic where solid+dotted regions touch
     touch_kernel   = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     dilated_solid  = cv2.dilate(solid_boundary,  touch_kernel, iterations=1)
     dilated_dotted = cv2.dilate(dotted_boundary, touch_kernel, iterations=1)
@@ -240,17 +368,15 @@ def _process_image(img_gray, col_gap_profile):
                     elif c_type == 2:
                         green_overlay[t_y:b_y, c] = 255
 
-            # Horizontal row-gap stitching
+            # Horizontal row-gap stitching (vectorized via morphological close)
             MAX_H_GAP = 60
-            for row in range(0, scale_line_y_threshold):
-                for overlay in [green_overlay, red_overlay]:
-                    cols = (np.where(overlay[row, start_idx:end_idx + 1] == 255)[0]
-                            + start_idx)
-                    if len(cols) > 1:
-                        for idx in range(len(cols) - 1):
-                            gap = int(cols[idx + 1]) - int(cols[idx])
-                            if 1 < gap < MAX_H_GAP:
-                                overlay[row, cols[idx]:cols[idx + 1]] = 255
+            h_stitch_kernel = cv2.getStructuringElement(
+                cv2.MORPH_RECT, (MAX_H_GAP, 1)
+            )
+            for overlay in [green_overlay, red_overlay]:
+                region = overlay[:scale_line_y_threshold, start_idx:end_idx + 1]
+                closed = cv2.morphologyEx(region, cv2.MORPH_CLOSE, h_stitch_kernel)
+                overlay[:scale_line_y_threshold, start_idx:end_idx + 1] = closed
 
     # Smoothing
     hor_close = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 1))
@@ -273,35 +399,92 @@ def _process_image(img_gray, col_gap_profile):
     return color_output
 
 
-# ── PUBLIC API ────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# PUBLIC API
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def colorize_cross_section(img_bytes: bytes) -> bytes:
     """
-    Main entry point. Takes raw PNG image bytes, runs the two-pass
-    coloring pipeline, and returns colored PNG bytes.
+    Colorize a single cross-section image.
 
-    Pass 1: Column gap profiling (bridge detection)
-    Pass 2: Production coloring with bridge-aware fill
-
-    Returns colored PNG bytes with:
-      - RED regions   = CUT
-      - GREEN regions = FILL
-      - BLUE line     = solid proposed grade
+    Takes raw PNG image bytes, runs the two-pass coloring pipeline,
+    and returns colored PNG bytes. Used for direct image uploads.
     """
-    # Decode image bytes to grayscale
     np_arr   = np.frombuffer(img_bytes, np.uint8)
     img_gray = cv2.imdecode(np_arr, cv2.IMREAD_GRAYSCALE)
 
     if img_gray is None:
-        # If decoding fails, return the original bytes unchanged
         return img_bytes
 
-    # PASS 1: gap profiling
-    col_gap_profile = _analyze_page_gaps(img_gray)
+    # PASS 1: gap profiling (returns cached masks)
+    col_gap_profile, masks = _analyze_page_gaps(img_gray)
 
-    # PASS 2: coloring
-    colored_bgr = _process_image(img_gray, col_gap_profile)
+    # PASS 2: coloring (reuses cached masks — no redundant _build_masks)
+    colored_bgr = _process_image(img_gray, col_gap_profile, masks=masks)
 
-    # Encode back to PNG bytes
     _, encoded = cv2.imencode('.png', colored_bgr)
     return encoded.tobytes()
+
+
+def extract_and_colorize_pdf(pdf_bytes: bytes) -> list[dict]:
+    """
+    Full pipeline for PDF input:
+      1. Extract individual cross-section images from the PDF
+      2. Run two-pass coloring on each extracted image
+
+    Args:
+        pdf_bytes : Raw PDF file bytes.
+
+    Returns:
+        list[dict] : Each dict contains:
+            - "raw_bytes"     : Original extracted PNG bytes (before coloring)
+            - "colored_bytes" : Colored PNG bytes
+            - "station"       : Station string (e.g. "23+50")
+            - "page_num"      : Original PDF page number (1-indexed)
+            - "index"         : Cross-section index within page (1-indexed)
+    """
+    # Step 1: Extract individual cross-section images
+    extracted = extract_cross_sections_from_pdf(pdf_bytes)
+
+    if not extracted:
+        return []
+
+    # Step 2: Read all images and run both passes with mask caching
+    results = []
+    for item in extracted:
+        raw_bytes = item["img_bytes"]
+
+        np_arr   = np.frombuffer(raw_bytes, np.uint8)
+        img_gray = cv2.imdecode(np_arr, cv2.IMREAD_GRAYSCALE)
+
+        if img_gray is None:
+            results.append({
+                "raw_bytes": raw_bytes,
+                "colored_bytes": raw_bytes,
+                "station": item["station"],
+                "page_num": item["page_num"],
+                "index": item["index"],
+            })
+            continue
+
+        try:
+            # PASS 1: gap profiling (caches masks)
+            col_gap_profile, masks = _analyze_page_gaps(img_gray)
+
+            # PASS 2: coloring (reuses cached masks)
+            colored_bgr = _process_image(img_gray, col_gap_profile, masks=masks)
+
+            _, encoded = cv2.imencode('.png', colored_bgr)
+            colored_bytes = encoded.tobytes()
+        except Exception:
+            colored_bytes = raw_bytes
+
+        results.append({
+            "raw_bytes": raw_bytes,
+            "colored_bytes": colored_bytes,
+            "station": item["station"],
+            "page_num": item["page_num"],
+            "index": item["index"],
+        })
+
+    return results

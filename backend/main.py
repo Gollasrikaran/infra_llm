@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from agent import extract_image_data_from_bytes, extract_station_only_from_bytes  # noqa: E402
 from shoelace_calculator import calculate_cross_section_area  # noqa: E402
-from cross_section_colorizer import colorize_cross_section  # noqa: E402
+from cross_section_colorizer import colorize_cross_section, extract_and_colorize_pdf  # noqa: E402
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
@@ -42,7 +42,11 @@ app.add_middleware(
 # PDF bytes stored in memory, keyed by file_id
 pdf_cache: dict[str, bytes] = {}
 
-# Colored page images stored in memory, keyed by file_id -> {page_num: bytes}
+# Extracted cross-section images, keyed by file_id -> {page_num: bytes}
+# page_num here refers to the extracted cross-section index (1-indexed), NOT the PDF page
+raw_cache: dict[str, dict[int, bytes]] = {}
+
+# Colored cross-section images, keyed by file_id -> {page_num: bytes}
 colored_cache: dict[str, dict[int, bytes]] = {}
 
 
@@ -137,41 +141,49 @@ async def upload_pdf(file: UploadFile = File(...)):
 
     pdf_bytes = await file.read()
 
+    # Validate PDF
     try:
-        total_pages = count_pages(pdf_bytes)
+        count_pages(pdf_bytes)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid PDF: {str(e)}")
 
     file_id = str(uuid.uuid4())
     pdf_cache[file_id] = pdf_bytes
 
-    # Step 1: Render each page and build page list (page numbers only)
-    pages_info = []
-    rendered_pages: dict[int, bytes] = {}  # cache raw renders for coloring step
-    for i in range(total_pages):
-        try:
-            img_bytes = render_page_png(pdf_bytes, i)
-            rendered_pages[i] = img_bytes
-        except Exception:
-            pass
-        # Station extraction commented out — using page numbers only
-        # station = extract_station_from_image(img_bytes)
-        pages_info.append({"page_num": i + 1})
+    # Extract individual cross-section images from the PDF and color them
+    try:
+        results = extract_and_colorize_pdf(pdf_bytes)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Cross-section extraction failed: {str(e)}",
+        )
 
-    # Step 2: Run OpenCV cross-section coloring on each page
+    if not results:
+        raise HTTPException(
+            status_code=400,
+            detail="No 23-series cross-section pages found in this PDF.",
+        )
+
+    # Store extracted images in caches — each cross-section gets a sequential number
+    raw_cache[file_id] = {}
     colored_cache[file_id] = {}
-    for i in range(total_pages):
-        try:
-            raw_bytes = rendered_pages.get(i) or render_page_png(pdf_bytes, i)
-            colored_bytes = colorize_cross_section(raw_bytes)
-            colored_cache[file_id][i + 1] = colored_bytes
-        except Exception:
-            # If coloring fails, fall back to the raw image
-            colored_cache[file_id][i + 1] = rendered_pages.get(i) or render_page_png(pdf_bytes, i)
+    pages_info = []
+
+    for idx, item in enumerate(results, 1):
+        raw_cache[file_id][idx] = item["raw_bytes"]
+        colored_cache[file_id][idx] = item["colored_bytes"]
+        pages_info.append({
+            "page_num": idx,
+            "station": item.get("station", ""),
+            "pdf_page": item.get("page_num", 0),
+        })
+
+    total_extracted = len(results)
 
     return UploadResponse(
         file_id=file_id,
-        total_pages=total_pages,
+        total_pages=total_extracted,
         filename=file.filename,
         pages=pages_info,
     )
@@ -180,66 +192,51 @@ async def upload_pdf(file: UploadFile = File(...)):
 
 @app.get("/api/pdf/{file_id}/page/{page_num}")
 async def get_pdf_page(file_id: str, page_num: int):
-    """Render one page of a previously-uploaded PDF as PNG."""
-    if file_id not in pdf_cache:
+    """Serve the raw extracted cross-section image."""
+    file_raws = raw_cache.get(file_id, {})
+    if not file_raws:
         raise HTTPException(status_code=404, detail="PDF not found. Upload it first.")
 
-    pdf_bytes = pdf_cache[file_id]
-    total_pages = count_pages(pdf_bytes)
-
-    if page_num < 1 or page_num > total_pages:
+    if page_num not in file_raws:
         raise HTTPException(
             status_code=400,
-            detail=f"Page {page_num} out of range (1-{total_pages})",
+            detail=f"Cross-section {page_num} not found (available: 1-{len(file_raws)})",
         )
 
-    img_bytes = render_page_png(pdf_bytes, page_num - 1)
-    return Response(content=img_bytes, media_type="image/png")
+    return Response(content=file_raws[page_num], media_type="image/png")
 
 
 @app.get("/api/pdf/{file_id}/page/{page_num}/colored")
 async def get_pdf_page_colored(file_id: str, page_num: int):
-    """Serve the pre-colored cross-section image for a page."""
-    if file_id not in pdf_cache:
+    """Serve the pre-colored cross-section image."""
+    file_colors = colored_cache.get(file_id, {})
+    if not file_colors:
         raise HTTPException(status_code=404, detail="PDF not found. Upload it first.")
 
-    total_pages = count_pages(pdf_cache[file_id])
-    if page_num < 1 or page_num > total_pages:
+    if page_num not in file_colors:
         raise HTTPException(
             status_code=400,
-            detail=f"Page {page_num} out of range (1-{total_pages})",
+            detail=f"Cross-section {page_num} not found (available: 1-{len(file_colors)})",
         )
 
-    # Return colored image if available, otherwise fall back to raw render
-    file_colors = colored_cache.get(file_id, {})
-    if page_num in file_colors:
-        return Response(content=file_colors[page_num], media_type="image/png")
-
-    img_bytes = render_page_png(pdf_cache[file_id], page_num - 1)
-    return Response(content=img_bytes, media_type="image/png")
+    return Response(content=file_colors[page_num], media_type="image/png")
 
 
 @app.post("/api/analyze/pdf-page", response_model=AnalysisResponse)
 async def analyze_pdf_page(request: AnalyzePageRequest):
-    """Render a PDF page then send it to Gemini for cross-section analysis."""
-    if request.file_id not in pdf_cache:
+    """Send a pre-colored extracted cross-section to Gemini for analysis."""
+    file_colors = colored_cache.get(request.file_id, {})
+    if not file_colors:
         raise HTTPException(status_code=404, detail="PDF not found. Upload it first.")
 
-    pdf_bytes = pdf_cache[request.file_id]
-    total_pages = count_pages(pdf_bytes)
-
-    if request.page_num < 1 or request.page_num > total_pages:
+    if request.page_num not in file_colors:
         raise HTTPException(
             status_code=400,
-            detail=f"Page {request.page_num} out of range (1-{total_pages})",
+            detail=f"Cross-section {request.page_num} not found (available: 1-{len(file_colors)})",
         )
 
-    # Use the pre-colored image for Gemini analysis
-    file_colors = colored_cache.get(request.file_id, {})
-    if request.page_num in file_colors:
-        img_bytes = file_colors[request.page_num]
-    else:
-        img_bytes = render_page_png(pdf_bytes, request.page_num - 1)
+    # Send the pre-colored image to Gemini
+    img_bytes = file_colors[request.page_num]
 
     try:
         raw_result = extract_image_data_from_bytes(img_bytes)
@@ -346,9 +343,10 @@ async def analyze_image(file: UploadFile = File(...)):
 
 @app.delete("/api/pdf/{file_id}")
 async def delete_pdf(file_id: str):
-    """Remove a PDF from the in-memory cache."""
+    """Remove a PDF and its extracted images from memory."""
     if file_id in pdf_cache:
         del pdf_cache[file_id]
+        raw_cache.pop(file_id, None)
         colored_cache.pop(file_id, None)
         return {"status": "deleted", "file_id": file_id}
     raise HTTPException(status_code=404, detail="PDF not found")
